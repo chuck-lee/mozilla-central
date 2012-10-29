@@ -1337,6 +1337,22 @@ MarionetteDriverActor.prototype = {
     }
   },
 
+  getElementSize: function MDA_getElementSize(aRequest) {
+    if (this.context == "chrome") {
+      try {
+        let el = this.curBrowser.elementManager.getKnownElement(aRequest.element, this.getCurrentWindow());
+        let clientRect = el.getBoundingClientRect();  
+        this.sendResponse({width: clientRect.width, height: clientRect.height});
+      }
+      catch (e) {
+        this.sendError(e.message, e.code, e.stack);
+      }
+    }
+    else {
+      this.sendAsync("getElementSize", {element:aRequest.element});
+    }
+  },
+
   /**
    * Send key presses to element after focusing on it
    *
@@ -1389,6 +1405,10 @@ MarionetteDriverActor.prototype = {
     else {
       this.sendAsync("clearElement", {element:aRequest.element});
     }
+  },
+
+  getElementPosition: function MDA_getElementPosition(aRequest) {
+      this.sendAsync("getElementPosition", {element:aRequest.element});
   },
 
   /**
@@ -1523,7 +1543,10 @@ MarionetteDriverActor.prototype = {
         file = FileUtils.openFileOutputStream(this.importedScripts, FileUtils.MODE_APPEND | FileUtils.MODE_WRONLY);
       }
       else {
+        //Note: The permission bits here don't actually get set (bug 804563)
+        this.importedScripts.createUnique(Components.interfaces.nsIFile.NORMAL_FILE_TYPE, parseInt("0666", 8));
         file = FileUtils.openFileOutputStream(this.importedScripts, FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE);
+        this.importedScripts.permissions = parseInt("0666", 8); //actually set permissions
       }
       file.write(aRequest.script, aRequest.script.length);
       file.close();
@@ -1684,9 +1707,11 @@ MarionetteDriverActor.prototype.requestTypes = {
   "getElementText": MarionetteDriverActor.prototype.getElementText,
   "getElementTagName": MarionetteDriverActor.prototype.getElementTagName,
   "isElementDisplayed": MarionetteDriverActor.prototype.isElementDisplayed,
+  "getElementSize": MarionetteDriverActor.prototype.getElementSize,
   "isElementEnabled": MarionetteDriverActor.prototype.isElementEnabled,
   "isElementSelected": MarionetteDriverActor.prototype.isElementSelected,
   "sendKeysToElement": MarionetteDriverActor.prototype.sendKeysToElement,
+  "getElementPosition": MarionetteDriverActor.prototype.getElementPosition,
   "clearElement": MarionetteDriverActor.prototype.clearElement,
   "getTitle": MarionetteDriverActor.prototype.getTitle,
   "getPageSource": MarionetteDriverActor.prototype.getPageSource,

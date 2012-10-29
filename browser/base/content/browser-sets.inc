@@ -91,6 +91,7 @@
     <command id="Tools:DevToolbar" oncommand="DeveloperToolbar.toggle();" disabled="true" hidden="true"/>
     <command id="Tools:DevToolbarFocus" oncommand="DeveloperToolbar.focusToggle();" disabled="true"/>
     <command id="Tools:WebConsole" oncommand="HUDConsoleUI.toggleHUD();"/>
+    <command id="Tools:RemoteWebConsole" oncommand="HUDConsoleUI.toggleRemoteHUD();" disabled="true" hidden="true"/>
     <command id="Tools:Inspect" oncommand="InspectorUI.toggleInspectorUI();"/>
     <command id="Tools:Debugger" oncommand="DebuggerUI.toggleDebugger();" disabled="true" hidden="true"/>
     <command id="Tools:RemoteDebugger" oncommand="DebuggerUI.toggleRemoteDebugger();" disabled="true" hidden="true"/>
@@ -203,6 +204,10 @@
                  type="checkbox" autocheck="false"
                  key="key_webConsole"
                  command="Tools:WebConsole"/>
+    <broadcaster id="devtoolsMenuBroadcaster_RemoteWebConsole"
+                 label="&remoteWebConsoleCmd.label;"
+                 type="checkbox" autocheck="false"
+                 command="Tools:RemoteWebConsole"/>
     <broadcaster id="devtoolsMenuBroadcaster_Inspect"
                  label="&inspectMenu.label;"
                  type="checkbox" autocheck="false"
@@ -402,7 +407,9 @@
 # overridden for other purposes there.
     <key id="viewBookmarksSidebarWinKb" key="&bookmarksWinCmd.commandkey;" command="viewBookmarksSidebar" modifiers="accel"/>
 #endif
+    
     <key id="sharePage" key="&sharePageCmd.commandkey;" command="Social:SharePage" modifiers="accel,shift"/>
+    <key id="focusChatBar" key="&social.chatBar.commandkey;" oncommand="SocialChatBar.focus();" modifiers="accel,shift"/>
 
 # don't use |command="Browser:Stop"|, ESC is being used to freeze animated gifs,
 # even if the stop button and menuitem are disabled (see Bug 284140)

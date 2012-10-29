@@ -71,7 +71,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
 
   // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE(nsGenericHTMLFormElement::)
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE
 
   // nsIDOMElement
   NS_FORWARD_NSIDOMELEMENT(nsGenericHTMLFormElement::)
@@ -556,7 +556,7 @@ nsHTMLTextAreaElement::SetValue(const nsAString& aValue)
 NS_IMETHODIMP 
 nsHTMLTextAreaElement::SetUserInput(const nsAString& aValue)
 {
-  if (!nsContentUtils::IsCallerTrustedForWrite()) {
+  if (!nsContentUtils::IsCallerChrome()) {
     return NS_ERROR_DOM_SECURITY_ERR;
   }
   SetValueInternal(aValue, true);

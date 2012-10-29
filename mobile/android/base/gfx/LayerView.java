@@ -17,6 +17,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.PointF;
+import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.os.Build;
 import android.util.AttributeSet;
@@ -60,8 +61,9 @@ public class LayerView extends FrameLayout {
     private Listener mListener;
 
     /* Flags used to determine when to show the painted surface. */
-    public static final int PAINT_BEFORE_FIRST = 0;
-    public static final int PAINT_AFTER_FIRST = 1;
+    public static final int PAINT_START = 0;
+    public static final int PAINT_BEFORE_FIRST = 1;
+    public static final int PAINT_AFTER_FIRST = 2;
 
     public boolean shouldUseTextureView() {
         // Disable TextureView support for now as it causes panning/zooming
@@ -90,7 +92,7 @@ public class LayerView extends FrameLayout {
         super(context, attrs);
 
         mGLController = new GLController(this);
-        mPaintState = PAINT_BEFORE_FIRST;
+        mPaintState = PAINT_START;
         mCheckerboardColor = Color.WHITE;
         mCheckerboardShouldShowChecks = true;
     }
@@ -108,9 +110,22 @@ public class LayerView extends FrameLayout {
         GeckoAccessibility.setDelegate(this);
     }
 
+    public void show() {
+        // Fix this if TextureView support is turned back on above
+        mSurfaceView.setVisibility(View.VISIBLE);
+    }
+
+    public void hide() {
+        // Fix this if TextureView support is turned back on above
+        mSurfaceView.setVisibility(View.INVISIBLE);
+    }
+
     public void destroy() {
         if (mLayerClient != null) {
             mLayerClient.destroy();
+        }
+        if (mRenderer != null) {
+            mRenderer.destroy();
         }
     }
 
@@ -271,7 +286,6 @@ public class LayerView extends FrameLayout {
 
     /* paintState must be a PAINT_xxx constant. */
     public void setPaintState(int paintState) {
-        Log.d(LOGTAG, "LayerView paint state set to " + paintState);
         mPaintState = paintState;
     }
 
@@ -399,5 +413,11 @@ public class LayerView extends FrameLayout {
         if (mLayerClient != null)
             return mLayerClient.getPanZoomController().getOverScrollMode();
         return super.getOverScrollMode();
+    }
+
+    @Override
+    public void onFocusChanged (boolean gainFocus, int direction, Rect previouslyFocusedRect) {
+        super.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
+        GeckoAccessibility.onLayerViewFocusChanged(this, gainFocus);
     }
 }

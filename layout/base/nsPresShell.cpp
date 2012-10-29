@@ -2998,26 +2998,25 @@ AccumulateFrameBounds(nsIFrame* aContainerFrame,
                       nsAutoLineIterator& aLines,
                       int32_t& aCurLine)
 {
-  nsRect frameBounds = aFrame->GetRect() +
-    aFrame->GetParent()->GetOffsetTo(aContainerFrame);
+  nsIFrame* frame = aFrame;
+  nsRect frameBounds = nsRect(nsPoint(0, 0), aFrame->GetSize());
 
   // If this is an inline frame and either the bounds height is 0 (quirks
   // layout model) or aUseWholeLineHeightForInlines is set, we need to
   // change the top of the bounds to include the whole line.
   if (frameBounds.height == 0 || aUseWholeLineHeightForInlines) {
-    nsIAtom* frameType = NULL;
     nsIFrame *prevFrame = aFrame;
     nsIFrame *f = aFrame;
 
-    while (f &&
-           (frameType = f->GetType()) == nsGkAtoms::inlineFrame) {
+    while (f && f->IsFrameOfType(nsIFrame::eLineParticipant) &&
+           !f->IsTransformed() && !f->IsPositioned()) {
       prevFrame = f;
       f = prevFrame->GetParent();
     }
 
     if (f != aFrame &&
         f &&
-        frameType == nsGkAtoms::blockFrame) {
+        f->GetType() == nsGkAtoms::blockFrame) {
       // find the line containing aFrame and increase the top of |offset|.
       if (f != aPrevBlock) {
         aLines = f->GetLineIterator();
@@ -3035,7 +3034,8 @@ AccumulateFrameBounds(nsIFrame* aContainerFrame,
 
           if (NS_SUCCEEDED(aLines->GetLine(index, &trash1, &trash2,
                                            lineBounds, &trash3))) {
-            lineBounds += f->GetOffsetTo(aContainerFrame);
+            frameBounds += frame->GetOffsetTo(f);
+            frame = f;
             if (lineBounds.y < frameBounds.y) {
               frameBounds.height = frameBounds.YMost() - lineBounds.y;
               frameBounds.y = lineBounds.y;
@@ -3046,14 +3046,17 @@ AccumulateFrameBounds(nsIFrame* aContainerFrame,
     }
   }
 
+  nsRect transformedBounds = nsLayoutUtils::TransformFrameRectToAncestor(frame,
+    frameBounds, aContainerFrame);
+
   if (aHaveRect) {
     // We can't use nsRect::UnionRect since it drops empty rects on
     // the floor, and we need to include them.  (Thus we need
     // aHaveRect to know when to drop the initial value on the floor.)
-    aRect.UnionRectEdges(aRect, frameBounds);
+    aRect.UnionRectEdges(aRect, transformedBounds);
   } else {
     aHaveRect = true;
-    aRect = frameBounds;
+    aRect = transformedBounds;
   }
 }
 
@@ -3276,8 +3279,10 @@ PresShell::DoScrollContentIntoView()
     return;
   }
 
+  // Make sure we skip 'frame' ... if it's scrollable, we should use its
+  // scrollable ancestor as the container.
   nsIFrame* container =
-    nsLayoutUtils::GetClosestFrameOfType(frame, nsGkAtoms::scrollFrame);
+    nsLayoutUtils::GetClosestFrameOfType(frame->GetParent(), nsGkAtoms::scrollFrame);
   if (!container) {
     // nothing can be scrolled
     return;
@@ -3354,8 +3359,14 @@ PresShell::ScrollFrameRectIntoView(nsIFrame*                aFrame,
         break;
       }
     }
-    rect += container->GetPosition();
-    nsIFrame* parent = container->GetParent();
+    nsIFrame* parent;
+    if (container->IsTransformed()) {
+      container->GetTransformMatrix(nullptr, &parent);
+      rect = nsLayoutUtils::TransformFrameRectToAncestor(container, rect, parent);
+    } else {
+      rect += container->GetPosition();
+      parent = container->GetParent();
+    }
     if (!parent && !(aFlags & nsIPresShell::SCROLL_NO_PARENT_FRAMES)) {
       nsPoint extraOffset(0,0);
       parent = nsLayoutUtils::GetCrossDocParentFrame(container, &extraOffset);
@@ -5205,32 +5216,34 @@ PresShell::ProcessSynthMouseMoveEvent(bool aFromScroll)
 class nsAutoNotifyDidPaint
 {
 public:
-  nsAutoNotifyDidPaint(bool aWillSendDidPaint)
-    : mWillSendDidPaint(aWillSendDidPaint)
+  nsAutoNotifyDidPaint(PresShell* aShell, uint32_t aFlags)
+    : mShell(aShell), mFlags(aFlags)
   {
   }
   ~nsAutoNotifyDidPaint()
   {
-    if (!mWillSendDidPaint && nsContentUtils::XPConnect()) {
+    mShell->GetPresContext()->NotifyDidPaintForSubtree(mFlags);
+    if (!(mFlags & nsIPresShell::PAINT_WILL_SEND_DID_PAINT) &&
+        nsContentUtils::XPConnect()) {
       nsContentUtils::XPConnect()->NotifyDidPaint();
     }
   }
 
 private:
-  bool mWillSendDidPaint;
+  PresShell* mShell;
+  uint32_t mFlags;
 };
 
 void
-PresShell::Paint(nsIView*           aViewToPaint,
-                 const nsRegion&    aDirtyRegion,
-                 PaintType          aType,
-                 bool               aWillSendDidPaint)
+PresShell::Paint(nsIView*        aViewToPaint,
+                 const nsRegion& aDirtyRegion,
+                 uint32_t        aFlags)
 {
   SAMPLE_LABEL("Paint", "PresShell::Paint");
   NS_ASSERTION(!mIsDestroying, "painting a destroyed PresShell");
   NS_ASSERTION(aViewToPaint, "null view");
 
-  nsAutoNotifyDidPaint notifyDidPaint(aWillSendDidPaint);
+  nsAutoNotifyDidPaint notifyDidPaint(this, aFlags);
 
   nsPresContext* presContext = GetPresContext();
   AUTO_LAYOUT_PHASE_ENTRY_POINT(presContext, Paint);
@@ -5254,7 +5267,7 @@ PresShell::Paint(nsIView*           aViewToPaint,
     // draws the window title bar on Mac), because a) it won't work
     // and b) below we don't want to clear NS_FRAME_UPDATE_LAYER_TREE,
     // that will cause us to forget to update the real layer manager!
-    if (aType == PaintType_Composite) {
+    if (!(aFlags & PAINT_LAYERS)) {
       if (layerManager->HasShadowManager()) {
         return;
       }
@@ -5277,7 +5290,8 @@ PresShell::Paint(nsIView*           aViewToPaint,
                                          LayerProperties::CloneFrom(layerManager->GetRoot()) : 
                                          nullptr);
 
-      if (layerManager->EndEmptyTransaction((aType == PaintType_NoComposite) ? LayerManager::END_NO_COMPOSITE : LayerManager::END_DEFAULT)) {
+      if (layerManager->EndEmptyTransaction((aFlags & PAINT_COMPOSITE) ?
+            LayerManager::END_DEFAULT : LayerManager::END_NO_COMPOSITE)) {
         nsIntRect invalid;
         if (props) {
           invalid = props->ComputeDifferences(layerManager->GetRoot(), computeInvalidFunc);
@@ -5298,7 +5312,6 @@ PresShell::Paint(nsIView*           aViewToPaint,
         }
 
         frame->UpdatePaintCountForPaintedPresShells();
-        presContext->NotifyDidPaintForSubtree();
         return;
       }
     }
@@ -5312,7 +5325,7 @@ PresShell::Paint(nsIView*           aViewToPaint,
 
   nscolor bgcolor = ComputeBackstopColor(aViewToPaint);
   uint32_t flags = nsLayoutUtils::PAINT_WIDGET_LAYERS | nsLayoutUtils::PAINT_EXISTING_TRANSACTION;
-  if (aType == PaintType_NoComposite) {
+  if (!(aFlags & PAINT_COMPOSITE)) {
     flags |= nsLayoutUtils::PAINT_NO_COMPOSITE;
   }
 
@@ -5327,9 +5340,6 @@ PresShell::Paint(nsIView*           aViewToPaint,
     nsLayoutUtils::PaintFrame(nullptr, frame, aDirtyRegion, bgcolor, flags);
 
     frame->EndDeferringInvalidatesForDisplayRoot();
-    if (aType != PaintType_Composite) {
-      presContext->NotifyDidPaintForSubtree();
-    }
     return;
   }
 
@@ -5343,13 +5353,8 @@ PresShell::Paint(nsIView*           aViewToPaint,
     root->SetVisibleRegion(bounds);
     layerManager->SetRoot(root);
   }
-  layerManager->EndTransaction(NULL, NULL, aType == PaintType_NoComposite ?
-                                             LayerManager::END_NO_COMPOSITE :
-                                             LayerManager::END_DEFAULT);
-
-  if (aType != PaintType_Composite) {
-    presContext->NotifyDidPaintForSubtree();
-  }
+  layerManager->EndTransaction(NULL, NULL, (aFlags & PAINT_COMPOSITE) ?
+    LayerManager::END_DEFAULT : LayerManager::END_NO_COMPOSITE);
 }
 
 // static
@@ -7030,11 +7035,6 @@ PresShell::WillPaint(bool aWillSendDidPaint)
   // interruptible; if we can't do all the reflows it's better to flicker a bit
   // than to freeze up.
   FlushPendingNotifications(Flush_InterruptibleLayout);
-}
-
-void
-PresShell::DidPaint()
-{
 }
 
 void

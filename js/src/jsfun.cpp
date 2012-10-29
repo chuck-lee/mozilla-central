@@ -545,11 +545,6 @@ fun_trace(JSTracer *trc, RawObject obj)
     obj->toFunction()->trace(trc);
 }
 
-/*
- * Reserve two slots in all function objects for XPConnect.  Note that this
- * does not bloat every instance, only those on which reserved slots are set,
- * and those on which ad-hoc properties are defined.
- */
 JS_FRIEND_DATA(Class) js::FunctionClass = {
     js_Function_str,
     JSCLASS_NEW_RESOLVE | JSCLASS_IMPLEMENTS_BARRIERS |
@@ -625,8 +620,12 @@ JSString *
 js::FunctionToString(JSContext *cx, HandleFunction fun, bool bodyOnly, bool lambdaParen)
 {
     StringBuffer out(cx);
+    RootedScript script(cx);
 
-    if (fun->isInterpreted() && fun->script()->isGeneratorExp) {
+    if (fun->isInterpreted())
+        script = fun->script();
+
+    if (fun->isInterpreted() && script->isGeneratorExp) {
         if ((!bodyOnly && !out.append("function genexp() {")) ||
             !out.append("\n    [generator expression]\n") ||
             (!bodyOnly && !out.append("}"))) {
@@ -648,13 +647,12 @@ js::FunctionToString(JSContext *cx, HandleFunction fun, bool bodyOnly, bool lamb
         }
     }
     bool haveSource = fun->isInterpreted() && !fun->isSelfHostedBuiltin();
-    if (haveSource && !fun->script()->scriptSource()->hasSourceData() &&
-        !fun->script()->loadSource(cx, &haveSource))
+    if (haveSource && !script->scriptSource()->hasSourceData() &&
+        !JSScript::loadSource(cx, script, &haveSource))
     {
         return NULL;
     }
     if (haveSource) {
-        RootedScript script(cx, fun->script());
         RootedString srcStr(cx, script->sourceData(cx));
         if (!srcStr)
             return NULL;

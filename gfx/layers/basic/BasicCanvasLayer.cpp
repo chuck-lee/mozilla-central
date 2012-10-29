@@ -14,6 +14,7 @@
 #include "nsXULAppAPI.h"
 
 using namespace mozilla::gfx;
+using namespace mozilla::gl;
 
 namespace mozilla {
 namespace layers {
@@ -416,6 +417,8 @@ BasicShadowableCanvasLayer::Paint(gfxContext* aContext, Layer* aMaskLayer)
     if (handle) {
       mGLContext->MakeCurrent();
       mGLContext->UpdateSharedHandle(flags, handle);
+      // call Painted() to reset our dirty 'bit'
+      Painted();
       FireDidTransactionCallback();
       BasicManager()->PaintedCanvas(BasicManager()->Hold(this),
                                     mNeedsYFlip,

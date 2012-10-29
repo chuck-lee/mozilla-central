@@ -78,6 +78,7 @@
 #include "mozilla/Services.h"
 #include "nsIPrivateBrowsingChannel.h"
 #include "mozIApplicationClearPrivateDataParams.h"
+#include "nsIOfflineCacheUpdate.h"
 
 #include <limits>
 
@@ -1335,8 +1336,6 @@ NS_GetAppInfo(nsIChannel *aChannel, uint32_t *aAppID, bool *aIsInBrowserElement)
     return true;
 }
 
-#define TOPIC_WEB_APP_CLEAR_DATA "webapps-clear-data"
-
 /**
  *  Gets appId and browserOnly parameters from the TOPIC_WEB_APP_CLEAR_DATA
  *  nsIObserverService notification.  Used when clearing user data or
@@ -1358,10 +1357,9 @@ NS_GetAppInfoFromClearDataNotification(nsISupports *aSubject,
     uint32_t appId;
     rv = clearParams->GetAppId(&appId);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
-    MOZ_ASSERT(appId != NECKO_NO_APP_ID);
     MOZ_ASSERT(appId != NECKO_UNKNOWN_APP_ID);
     NS_ENSURE_SUCCESS(rv, rv);
-    if (appId == NECKO_NO_APP_ID || appId == NECKO_UNKNOWN_APP_ID) {
+    if (appId == NECKO_UNKNOWN_APP_ID) {
         return NS_ERROR_UNEXPECTED;
     }
 
@@ -1373,6 +1371,29 @@ NS_GetAppInfoFromClearDataNotification(nsISupports *aSubject,
     *aAppID = appId;
     *aBrowserOnly = browserOnly;
     return NS_OK;
+}
+
+/**
+ * Determines whether appcache should be checked for a given URI.
+ */
+inline bool
+NS_ShouldCheckAppCache(nsIURI *aURI, bool usePrivateBrowsing)
+{
+    if (usePrivateBrowsing) {
+        return false;
+    }
+
+    nsCOMPtr<nsIOfflineCacheUpdateService> offlineService =
+        do_GetService("@mozilla.org/offlinecacheupdate-service;1");
+    if (!offlineService) {
+        return false;
+    }
+
+    bool allowed;
+    nsresult rv = offlineService->OfflineAppAllowedForURI(aURI,
+                                                          nullptr,
+                                                          &allowed);
+    return NS_SUCCEEDED(rv) && allowed;
 }
 
 /**

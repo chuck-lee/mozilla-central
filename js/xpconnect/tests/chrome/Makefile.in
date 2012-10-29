@@ -11,6 +11,7 @@ relativesrcdir  = @relativesrcdir@
 include $(DEPTH)/config/autoconf.mk
 
 MOCHITEST_CHROME_FILES = \
+		test_bug361111.xul \
 		test_bug448587.xul \
 		test_bug484459.xul \
 		test_bug500931.xul \
@@ -36,6 +37,7 @@ MOCHITEST_CHROME_FILES = \
 		test_bug743843.xul \
 		test_bug760076.xul \
 		test_bug760109.xul \
+		test_bug760131.html \
 		test_bug763343.xul \
 		test_bug771429.xul \
 		test_bug773962.xul \
@@ -62,6 +64,8 @@ MOCHITEST_CHROME_FILES = \
 		test_precisegc.xul \
 		test_sandboxImport.xul \
 		test_weakmaps.xul \
+		test_weakmap_keys_preserved.xul \
+		test_weakmap_keys_preserved2.xul \
 		test_weakref.xul \
 		test_wrappers.xul \
 		$(NULL)

@@ -49,8 +49,8 @@ PRLogModuleInfo *gSTSLog = PR_NewLogModule("nsSTSService");
 nsSTSHostEntry::nsSTSHostEntry(const char* aHost)
   : mHost(aHost)
   , mExpireTime(0)
-  , mExpired(false)
   , mStsPermission(STS_UNSET)
+  , mExpired(false)
   , mIncludeSubdomains(false)
 {
 }
@@ -58,8 +58,8 @@ nsSTSHostEntry::nsSTSHostEntry(const char* aHost)
 nsSTSHostEntry::nsSTSHostEntry(const nsSTSHostEntry& toCopy)
   : mHost(toCopy.mHost)
   , mExpireTime(toCopy.mExpireTime)
-  , mExpired(toCopy.mExpired)
   , mStsPermission(toCopy.mStsPermission)
+  , mExpired(toCopy.mExpired)
   , mIncludeSubdomains(toCopy.mIncludeSubdomains)
 {
 }
@@ -374,16 +374,23 @@ int STSPreloadCompare(const void *key, const void *entry)
 const nsSTSPreload *
 nsStrictTransportSecurityService::GetPreloadListEntry(const char *aHost)
 {
-  if (mUsePreloadList) {
+  PRTime currentTime = PR_Now();
+  int32_t timeOffset = 0;
+  nsresult rv = mozilla::Preferences::GetInt("test.currentTimeOffsetSeconds",
+                                             &timeOffset);
+  if (NS_SUCCEEDED(rv)) {
+    currentTime += (PRTime(timeOffset) * PR_USEC_PER_SEC);
+  }
+
+  if (mUsePreloadList && currentTime < gPreloadListExpirationTime) {
     return (const nsSTSPreload *) bsearch(aHost,
                                           kSTSPreloadList,
                                           PR_ARRAY_SIZE(kSTSPreloadList),
                                           sizeof(nsSTSPreload),
                                           STSPreloadCompare);
   }
-  else {
-    return nullptr;
-  }
+
+  return nullptr;
 }
 
 NS_IMETHODIMP

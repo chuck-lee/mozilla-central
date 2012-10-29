@@ -106,7 +106,8 @@ typedef FrameMetrics::ViewID ViewID;
 /* static */ uint32_t nsLayoutUtils::sFontSizeInflationEmPerLine;
 /* static */ uint32_t nsLayoutUtils::sFontSizeInflationMinTwips;
 /* static */ uint32_t nsLayoutUtils::sFontSizeInflationLineThreshold;
-/* static */ int32_t nsLayoutUtils::sFontSizeInflationMappingIntercept;
+/* static */ int32_t  nsLayoutUtils::sFontSizeInflationMappingIntercept;
+/* static */ uint32_t nsLayoutUtils::sFontSizeInflationMaxRatio;
 
 static ViewID sScrollIdCounter = FrameMetrics::START_SCROLL_ID;
 
@@ -717,7 +718,7 @@ nsLayoutUtils::DoCompareTreePosition(nsIContent* aContent1,
 
   nsAutoTArray<nsINode*, 32> content1Ancestors;
   nsINode* c1;
-  for (c1 = aContent1; c1 && c1 != aCommonAncestor; c1 = c1->GetNodeParent()) {
+  for (c1 = aContent1; c1 && c1 != aCommonAncestor; c1 = c1->GetParentNode()) {
     content1Ancestors.AppendElement(c1);
   }
   if (!c1 && aCommonAncestor) {
@@ -728,7 +729,7 @@ nsLayoutUtils::DoCompareTreePosition(nsIContent* aContent1,
 
   nsAutoTArray<nsINode*, 32> content2Ancestors;
   nsINode* c2;
-  for (c2 = aContent2; c2 && c2 != aCommonAncestor; c2 = c2->GetNodeParent()) {
+  for (c2 = aContent2; c2 && c2 != aCommonAncestor; c2 = c2->GetParentNode()) {
     content2Ancestors.AppendElement(c2);
   }
   if (!c2 && aCommonAncestor) {
@@ -764,7 +765,7 @@ nsLayoutUtils::DoCompareTreePosition(nsIContent* aContent1,
   }
 
   // content1Ancestor != content2Ancestor, so they must be siblings with the same parent
-  nsINode* parent = content1Ancestor->GetNodeParent();
+  nsINode* parent = content1Ancestor->GetParentNode();
 #ifdef DEBUG
   // TODO: remove the uglyness, see bug 598468.
   NS_ASSERTION(gPreventAssertInCompareTreePosition || parent,
@@ -1302,7 +1303,11 @@ gfx3DMatrix
 nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame, const nsIFrame *aAncestor)
 {
   nsIFrame* parent;
-  gfx3DMatrix ctm = aFrame->GetTransformMatrix(aAncestor, &parent);
+  gfx3DMatrix ctm;
+  if (aFrame == aAncestor) {
+    return ctm;
+  }
+  ctm = aFrame->GetTransformMatrix(aAncestor, &parent);
   while (parent && parent != aAncestor) {
     if (!parent->Preserves3DChildren()) {
       ctm.ProjectTo2D();
@@ -3684,7 +3689,7 @@ ComputeSnappedImageDrawingParameters(gfxContext*     aCtx,
                                      const nsIntSize aImageSize)
 
 {
-  if (aDest.IsEmpty() || aFill.IsEmpty())
+  if (aDest.IsEmpty() || aFill.IsEmpty() || !aImageSize.width || !aImageSize.height)
     return SnappedImageDrawingParameters();
 
   gfxRect devPixelDest =
@@ -4735,6 +4740,8 @@ nsLayoutUtils::SizeOfTextRunsForFrames(nsIFrame* aFrame,
 void
 nsLayoutUtils::Initialize()
 {
+  Preferences::AddUintVarCache(&sFontSizeInflationMaxRatio,
+                               "font.size.inflation.maxRatio");
   Preferences::AddUintVarCache(&sFontSizeInflationEmPerLine,
                                "font.size.inflation.emPerLine");
   Preferences::AddUintVarCache(&sFontSizeInflationMinTwips,
@@ -5013,8 +5020,10 @@ nsLayoutUtils::FontSizeInflationInner(const nsIFrame *aFrame,
   }
 
   int32_t interceptParam = nsLayoutUtils::FontSizeInflationMappingIntercept();
+  float maxRatio = (float)nsLayoutUtils::FontSizeInflationMaxRatio() / 100.0f;
 
   float ratio = float(styleFontSize) / float(aMinFontSize);
+  float inflationRatio;
 
   // Given a minimum inflated font size m, a specified font size s, we want to
   // find the inflated font size i and then return the ratio of i to s (i/s).
@@ -5037,12 +5046,18 @@ nsLayoutUtils::FontSizeInflationInner(const nsIFrame *aFrame,
     // graph is a line from (0, m), to that point). We calculate the
     // intersection point to be ((1+P/2)m, (1+P/2)m), where P is the
     // intercept parameter above. We then need to return i/s.
-    return (1.0f + (ratio * (intercept - 1) / intercept)) / ratio;
+    inflationRatio = (1.0f + (ratio * (intercept - 1) / intercept)) / ratio;
   } else {
     // This is the case where P is negative. We essentially want to implement
     // the case for P=infinity here, so we make i = s + m, which means that
     // i/s = s/s + m/s = 1 + 1/ratio
-    return 1 + 1.0f / ratio;
+    inflationRatio = 1 + 1.0f / ratio;
+  }
+
+  if (maxRatio > 1.0 && inflationRatio > maxRatio) {
+    return maxRatio;
+  } else {
+    return inflationRatio;
   }
 }
 

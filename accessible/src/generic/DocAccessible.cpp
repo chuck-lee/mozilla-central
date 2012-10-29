@@ -243,29 +243,6 @@ DocAccessible::NativeRole()
   return roles::PANE; // Fall back;
 }
 
-// Accessible public method
-void
-DocAccessible::SetRoleMapEntry(nsRoleMapEntry* aRoleMapEntry)
-{
-  NS_ASSERTION(mDocument, "No document during initialization!");
-  if (!mDocument)
-    return;
-
-  mRoleMapEntry = aRoleMapEntry;
-
-  nsIDocument *parentDoc = mDocument->GetParentDocument();
-  if (!parentDoc)
-    return; // No parent document for the root document
-
-  // Allow use of ARIA role from outer to override
-  nsIContent *ownerContent = parentDoc->FindContentForSubDocument(mDocument);
-  if (ownerContent) {
-    nsRoleMapEntry* roleMapEntry = aria::GetRoleMap(ownerContent);
-    if (roleMapEntry)
-      mRoleMapEntry = roleMapEntry; // Override
-  }
-}
-
 void
 DocAccessible::Description(nsString& aDescription)
 {
@@ -339,17 +316,26 @@ DocAccessible::ApplyARIAState(uint64_t* aState) const
   // Allow iframe/frame etc. to have final state override via ARIA
   if (mParent)
     mParent->ApplyARIAState(aState);
-
 }
 
-NS_IMETHODIMP
-DocAccessible::GetAttributes(nsIPersistentProperties** aAttributes)
+already_AddRefed<nsIPersistentProperties>
+DocAccessible::Attributes()
 {
-  Accessible::GetAttributes(aAttributes);
-  if (mParent) {
-    mParent->GetAttributes(aAttributes); // Add parent attributes (override inner)
-  }
-  return NS_OK;
+  nsCOMPtr<nsIPersistentProperties> attributes =
+    HyperTextAccessibleWrap::Attributes();
+
+  // No attributes if document is not attached to the tree or if it's a root
+  // document.
+  if (!mParent || IsRoot())
+    return attributes.forget();
+
+  // Override ARIA object attributes from outerdoc.
+  aria::AttrIterator attribIter(mParent->GetContent());
+  nsAutoString name, value, unused;
+  while(attribIter.Next(name, value))
+    attributes->SetStringProperty(NS_ConvertUTF16toUTF8(name), value, unused);
+
+  return attributes.forget();
 }
 
 Accessible*
@@ -1387,7 +1373,7 @@ DocAccessible::GetAccessibleOrContainer(nsINode* aNode)
   nsINode* currNode = aNode;
   Accessible* accessible = nullptr;
   while (!(accessible = GetAccessible(currNode)) &&
-         (currNode = currNode->GetNodeParent()));
+         (currNode = currNode->GetParentNode()));
 
   return accessible;
 }

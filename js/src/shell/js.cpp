@@ -573,7 +573,6 @@ static const struct JSOption {
     {"atline",          JSOPTION_ATLINE},
     {"methodjit",       JSOPTION_METHODJIT},
     {"methodjit_always",JSOPTION_METHODJIT_ALWAYS},
-    {"relimit",         JSOPTION_RELIMIT},
     {"strict",          JSOPTION_STRICT},
     {"typeinfer",       JSOPTION_TYPE_INFERENCE},
     {"werror",          JSOPTION_WERROR},
@@ -2522,6 +2521,13 @@ EvalInFrame(JSContext *cx, unsigned argc, jsval *vp)
                         : false;
 
     JS_ASSERT(cx->hasfp());
+
+    /* This is a copy of CheckDebugMode. */
+    if (!JS_GetDebugMode(cx)) {
+        JS_ReportErrorFlagsAndNumber(cx, JSREPORT_ERROR, js_GetErrorMessage,
+                                     NULL, JSMSG_NEED_DEBUG_MODE);
+        return false;
+    }
 
     /* Debug-mode currently disables Ion compilation. */
     ScriptFrameIter fi(cx);

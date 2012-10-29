@@ -15,21 +15,82 @@
 
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/Services.h"
+#include "mozilla/StaticPtr.h"
+#include "nsIObserver.h"
+#include "nsIObserverService.h"
 #include "nsIInputStream.h"
 
 USING_BLUETOOTH_NAMESPACE
+using namespace mozilla;
 using namespace mozilla::ipc;
 
+class BluetoothOppManagerObserver : public nsIObserver
+{
+public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIOBSERVER
+
+  BluetoothOppManagerObserver()
+  {
+  }
+
+  bool Init()
+  {
+    nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
+    if (NS_FAILED(obs->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false))) {
+      NS_WARNING("Failed to add shutdown observer!");
+      return false;
+    }
+
+    return true;
+  }
+
+  bool Shutdown()
+  {
+    nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
+    if (!obs ||
+        (NS_FAILED(obs->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID)))) {
+      NS_WARNING("Can't unregister observers, or already unregistered!");
+      return false;
+    }
+    return true;
+  }
+
+  ~BluetoothOppManagerObserver()
+  {
+    Shutdown();
+  }
+};
+
+namespace {
 // Sending system message "bluetooth-opp-update-progress" every 50kb
 static const uint32_t kUpdateProgressBase = 50 * 1024;
-
-static mozilla::RefPtr<BluetoothOppManager> sInstance;
+StaticRefPtr<BluetoothOppManager> sInstance;
+StaticRefPtr<BluetoothOppManagerObserver> sOppObserver;
 static nsCOMPtr<nsIInputStream> stream = nullptr;
 static uint32_t sSentFileLength = 0;
 static nsString sFileName;
 static uint32_t sFileLength = 0;
 static nsString sContentType;
 static int sUpdateProgressCounter = 0;
+static bool sInShutdown = false;
+}
+
+NS_IMETHODIMP
+BluetoothOppManagerObserver::Observe(nsISupports* aSubject,
+                                     const char* aTopic,
+                                     const PRUnichar* aData)
+{
+  MOZ_ASSERT(sInstance);
+
+  if (!strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
+    return sInstance->HandleShutdown();
+  }
+
+  MOZ_ASSERT(false, "BluetoothOppManager got unexpected topic!");
+  return NS_ERROR_UNEXPECTED;
+}
 
 class ReadFileTask : public nsRunnable
 {
@@ -100,6 +161,7 @@ BluetoothOppManager::BluetoothOppManager() : mConnected(false)
                                            , mPacketLeftLength(0)
                                            , mReceiving(false)
                                            , mPutFinal(false)
+                                           , mWaitingForConfirmationFlag(false)
 {
   // FIXME / Bug 800249:
   //   mConnectedDeviceAddress is Bluetooth address of connected device,
@@ -160,6 +222,16 @@ BluetoothOppManager::Disconnect()
   CloseSocket();
 }
 
+nsresult
+BluetoothOppManager::HandleShutdown()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  sInShutdown = true;
+  CloseSocket();
+  sInstance = nullptr;
+  return NS_OK;
+}
+
 bool
 BluetoothOppManager::Listen()
 {
@@ -213,6 +285,28 @@ BluetoothOppManager::StopSendingFile(BluetoothReplyRunnable* aRunnable)
   mAbortFlag = true;
 
   return true;
+}
+
+void
+BluetoothOppManager::ConfirmReceivingFile(bool aConfirm,
+                                          BluetoothReplyRunnable* aRunnable)
+{
+  if (!mWaitingForConfirmationFlag) {
+    NS_WARNING("We are not waiting for a confirmation now.");
+    return;
+  }
+
+  NS_ASSERTION(mPacketLeftLength == 0,
+               "Should not be in the middle of receiving a PUT packet.");
+
+  mWaitingForConfirmationFlag = false;
+  ReplyToPut(mPutFinal, aConfirm);
+
+  if (mPutFinal || !aConfirm) {
+    mReceiving = false;
+    FileTransferComplete(mConnectedDeviceAddress, aConfirm, true, sFileName,
+                         sSentFileLength, sContentType);
+  }
 }
 
 // Virtual function of class SocketConsumer
@@ -365,8 +459,8 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
         pktHeaders.GetContentType(sContentType);
         pktHeaders.GetLength(&sFileLength);
 
-        ReceivingFileConfirmation(mConnectedDeviceAddress, sFileName, sFileLength, sContentType);
         mReceiving = true;
+        mWaitingForConfirmationFlag = true;
       }
 
       /*
@@ -388,12 +482,17 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       }
 
       if (mPacketLeftLength == 0) {
-        ReplyToPut(mPutFinal);
+        if (mWaitingForConfirmationFlag) {
+          ReceivingFileConfirmation(mConnectedDeviceAddress, sFileName,
+                                    sFileLength, sContentType);
+        } else {
+          ReplyToPut(mPutFinal, true);
 
-        if (mPutFinal) {
-          mReceiving = false;
-          FileTransferComplete(mConnectedDeviceAddress, true, true, sFileName,
-                               sSentFileLength, sContentType);
+          if (mPutFinal) {
+            mReceiving = false;
+            FileTransferComplete(mConnectedDeviceAddress, true, true, sFileName,
+                                 sSentFileLength, sContentType);
+          }
         }
       }
     }
@@ -569,7 +668,7 @@ BluetoothOppManager::ReplyToDisconnect()
 }
 
 void
-BluetoothOppManager::ReplyToPut(bool aFinal)
+BluetoothOppManager::ReplyToPut(bool aFinal, bool aContinue)
 {
   if (!mConnected) return;
 
@@ -578,10 +677,18 @@ BluetoothOppManager::ReplyToPut(bool aFinal)
   uint8_t req[255];
   int index = 3;
 
-  if (aFinal) {
-    SetObexPacketInfo(req, ObexResponseCode::Success, index);
+  if (aContinue) {
+    if (aFinal) {
+      SetObexPacketInfo(req, ObexResponseCode::Success, index);
+    } else {
+      SetObexPacketInfo(req, ObexResponseCode::Continue, index);
+    }
   } else {
-    SetObexPacketInfo(req, ObexResponseCode::Continue, index);
+    if (aFinal) {
+      SetObexPacketInfo(req, ObexResponseCode::Unauthorized, index);
+    } else {
+      SetObexPacketInfo(req, ObexResponseCode::Unauthorized & (~FINAL_BIT), index);
+    }
   }
 
   UnixSocketRawData* s = new UnixSocketRawData(index);

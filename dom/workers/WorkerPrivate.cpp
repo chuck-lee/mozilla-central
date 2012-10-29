@@ -2515,11 +2515,7 @@ WorkerPrivate::Create(JSContext* aCx, JSObject* aObj, WorkerPrivate* aParent,
     nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
     NS_ASSERTION(ssm, "This should never be null!");
 
-    bool isChrome;
-    if (NS_FAILED(ssm->IsCapabilityEnabled("UniversalXPConnect", &isChrome))) {
-      NS_WARNING("IsCapabilityEnabled failed!");
-      isChrome = false;
-    }
+    bool isChrome = nsContentUtils::IsCallerChrome();
 
     // First check to make sure the caller has permission to make a
     // ChromeWorker if they called the ChromeWorker constructor.
@@ -3786,7 +3782,7 @@ WorkerPrivate::SetTimeout(JSContext* aCx, unsigned aArgc, jsval* aVp,
 }
 
 bool
-WorkerPrivate::ClearTimeout(JSContext* aCx, uint32 aId)
+WorkerPrivate::ClearTimeout(JSContext* aCx, uint32_t aId)
 {
   AssertIsOnWorkerThread();
 

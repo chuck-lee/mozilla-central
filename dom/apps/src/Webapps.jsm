@@ -17,6 +17,7 @@ Cu.import("resource://gre/modules/FileUtils.jsm");
 Cu.import('resource://gre/modules/ActivitiesService.jsm');
 Cu.import("resource://gre/modules/AppsUtils.jsm");
 Cu.import("resource://gre/modules/PermissionsInstaller.jsm");
+Cu.import("resource://gre/modules/OfflineCacheInstaller.jsm");
 
 function debug(aMsg) {
   //dump("-*-*- Webapps.jsm : " + aMsg + "\n");
@@ -67,6 +68,7 @@ let DOMApplicationRegistry = {
                      "Webapps:Launch", "Webapps:GetAll",
                      "Webapps:InstallPackage", "Webapps:GetBasePath",
                      "Webapps:GetList", "Webapps:RegisterForMessages",
+                     "Webapps:UnregisterForMessages",
                      "Webapps:CancelDownload", "Webapps:CheckForUpdate",
                      "Webapps::Download", "Webapps::ApplyDownload",
                      "child-process-shutdown"];
@@ -91,7 +93,7 @@ let DOMApplicationRegistry = {
   // aNext() is called after we load the current webapps list.
   loadCurrentRegistry: function loadCurrentRegistry(aNext) {
     let file = FileUtils.getFile(DIRECTORY_NAME, ["webapps", "webapps.json"], false);
-    if (file && file.exists) {
+    if (file && file.exists()) {
       this._loadJSONAsync(file, (function loadRegistry(aData) {
         if (aData) {
           this.webapps = aData;
@@ -138,13 +140,22 @@ let DOMApplicationRegistry = {
   // Registers all the activities and system messages.
   registerAppsHandlers: function registerAppsHandlers() {
     this.notifyAppsRegistryStart();
-#ifdef MOZ_SYS_MSG
     let ids = [];
     for (let id in this.webapps) {
       ids.push({ id: id });
     }
+#ifdef MOZ_SYS_MSG
     this._processManifestForIds(ids);
 #else
+    // Read the CSPs. If MOZ_SYS_MSG is defined this is done on
+    // _processManifestForIds so as to not reading the manifests
+    // twice
+    this._readManifests(ids, (function readCSPs(aResults) {
+      aResults.forEach(function registerManifest(aResult) {
+        this.webapps[aResult.id].csp = manifest.csp || "";
+      }, this);
+    }).bind(this));
+
     // Nothing else to do but notifying we're ready.
     this.notifyAppsRegistryReady();
 #endif
@@ -165,95 +176,105 @@ let DOMApplicationRegistry = {
     }).bind(this));
   },
 
+  updateOfflineCacheForApp: function updateOfflineCacheForApp(aId) {
+    let app = this.webapps[aId];
+    OfflineCacheInstaller.installCache({
+      basePath: app.basePath,
+      appId: aId,
+      origin: app.origin,
+      localId: app.localId
+    });
+  },
+
   // Implements the core of bug 787439
-  // 1. load the apps from the current registry.
-  // 2. if at first run, go through these steps:
+  // if at first run, go through these steps:
   //   a. load the core apps registry.
   //   b. uninstall any core app from the current registry but not in the
   //      new core apps registry.
   //   c. for all apps in the new core registry, install them if they are not
   //      yet in the current registry, and run installPermissions()
+  installSystemApps: function installSystemApps(aNext) {
+    let file;
+    try {
+      file = FileUtils.getFile("coreAppsDir", ["webapps", "webapps.json"], false);
+    } catch(e) { }
+
+    if (file && file.exists()) {
+      // a
+      this._loadJSONAsync(file, (function loadCoreRegistry(aData) {
+        if (!aData) {
+          aNext();
+          return;
+        }
+
+        // b : core apps are not removable.
+        for (let id in this.webapps) {
+          if (id in aData || this.webapps[id].removable)
+            continue;
+          delete this.webapps[id];
+          // Remove the permissions, cookies and private data for this app.
+          let localId = this.webapps[id].localId;
+          let permMgr = Cc["@mozilla.org/permissionmanager;1"]
+                          .getService(Ci.nsIPermissionManager);
+          permMgr.RemovePermissionsForApp(localId);
+          Services.cookies.removeCookiesForApp(localId, false);
+          this._clearPrivateData(localId, false);
+        }
+
+        let appDir = FileUtils.getDir("coreAppsDir", ["webapps"], false);
+        // c
+        for (let id in aData) {
+          // Core apps have ids matching their domain name (eg: dialer.gaiamobile.org)
+          // Use that property to check if they are new or not.
+          if (!(id in this.webapps)) {
+            this.webapps[id] = aData[id];
+            this.webapps[id].basePath = appDir.path;
+
+            // Create a new localId.
+            this.webapps[id].localId = this._nextLocalId();
+
+            // Core apps are not removable.
+            if (this.webapps[id].removable === undefined) {
+              this.webapps[id].removable = false;
+            }
+          }
+        }
+        aNext();
+      }).bind(this));
+    } else {
+      aNext();
+    }
+  },
+
   loadAndUpdateApps: function loadAndUpdateApps() {
     let runUpdate = AppsUtils.isFirstRun(Services.prefs);
 
-    // 1.
-    this.loadCurrentRegistry((function() {
-#ifdef MOZ_WIDGET_GONK
-    // if first run, merge the system apps.
-    if (runUpdate) {
-      let file;
-      try {
-        file = FileUtils.getFile("coreAppsDir", ["webapps", "webapps.json"], false);
-      } catch(e) { }
-
-      if (file && file.exists) {
-        // 2.a
-        this._loadJSONAsync(file, (function loadCoreRegistry(aData) {
-          if (!aData) {
-            this.registerAppsHandlers();
-            return;
-          }
-
-          // 2.b : core apps are not removable.
-          for (let id in this.webapps) {
-            if (id in aData || this.webapps[id].removable)
-              continue;
-            delete this.webapps[id];
-            // Remove the permissions, cookies and private data for this app.
-            let localId = this.webapps[id].localId;
-            let permMgr = Cc["@mozilla.org/permissionmanager;1"]
-                            .getService(Ci.nsIPermissionManager);
-            permMgr.RemovePermissionsForApp(localId);
-            Services.cookies.removeCookiesForApp(localId, false);
-            this._clearPrivateData(localId, false);
-          }
-
-          let appDir = FileUtils.getDir("coreAppsDir", ["webapps"], false);
-          // 2.c
-          for (let id in aData) {
-            // Core apps have ids matching their domain name (eg: dialer.gaiamobile.org)
-            // Use that property to check if they are new or not.
-            if (!(id in this.webapps)) {
-              this.webapps[id] = aData[id];
-              this.webapps[id].basePath = appDir.path;
-
-              // Create a new localId.
-              this.webapps[id].localId = this._nextLocalId();
-
-              // Core apps are not removable.
-              if (this.webapps[id].removable === undefined) {
-                this.webapps[id].removable = false;
-              }
-            }
-
-            this.updatePermissionsForApp(id);
-          }
-          this.registerAppsHandlers();
-        }).bind(this));
-      } else {
-        // At first run, set up the permissions for eng builds.
+    let onAppsLoaded = (function onAppsLoaded() {
+      if (runUpdate) {
+        // At first run, set up the permissions
         for (let id in this.webapps) {
           this.updatePermissionsForApp(id);
+          this.updateOfflineCacheForApp(id);
         }
-        this.registerAppsHandlers();
       }
-    } else {
       this.registerAppsHandlers();
-    }
+    }).bind(this);
+
+    this.loadCurrentRegistry((function() {
+#ifdef MOZ_WIDGET_GONK
+      // if first run, merge the system apps.
+      if (runUpdate)
+        this.installSystemApps(onAppsLoaded);
+      else
+        onAppsLoaded();
 #else
-    if (runUpdate) {
-      // At first run, set up the permissions for desktop builds.
-      for (let id in this.webapps) {
-        this.updatePermissionsForApp(id);
-      }
-    }
-    this.registerAppsHandlers();
+      onAppsLoaded();
 #endif
     }).bind(this));
   },
 
 #ifdef MOZ_SYS_MSG
-  // aEntryPoint is either the entry_point name or the null, in which case we
+  // |aEntryPoint| is either the entry_point name or the null in which case we
   // use the root of the manifest.
   _registerSystemMessagesForEntryPoint: function(aManifest, aApp, aEntryPoint) {
     let root = aManifest;
@@ -294,16 +315,17 @@ let DOMApplicationRegistry = {
     }
   },
 
-  // aEntryPoint is either the entry_point name or the null, in which case we
+  // |aEntryPoint| is either the entry_point name or the null in which case we
   // use the root of the manifest.
-  _registerActivitiesForEntryPoint: function(aManifest, aApp, aEntryPoint) {
+  _createActivitiesToRegister: function(aManifest, aApp, aEntryPoint) {
+    let activitiesToRegister = [];
     let root = aManifest;
     if (aEntryPoint && aManifest.entry_points[aEntryPoint]) {
       root = aManifest.entry_points[aEntryPoint];
     }
 
     if (!root.activities) {
-      return;
+      return activitiesToRegister;
     }
 
     let manifest = new ManifestHelper(aManifest, aApp.origin);
@@ -313,84 +335,115 @@ let DOMApplicationRegistry = {
         description.href = manifest.launch_path;
       }
       description.href = manifest.resolveFromOrigin(description.href);
-      let json = {
-        "manifest": aApp.manifestURL,
-        "name": activity,
-        "title": manifest.name,
-        "icon": manifest.iconURLForSize(128),
-        "description": description
-      }
-      this.activitiesToRegister++;
-      cpmm.sendAsyncMessage("Activities:Register", json);
+      activitiesToRegister.push({ "manifest": aApp.manifestURL,
+                                  "name": activity,
+                                  "title": manifest.name,
+                                  "icon": manifest.iconURLForSize(128),
+                                  "description": description });
 
       let launchPath =
         Services.io.newURI(manifest.resolveFromOrigin(description.href), null, null);
       let manifestURL = Services.io.newURI(aApp.manifestURL, null, null);
       msgmgr.registerPage("activity", launchPath, manifestURL);
     }
+    return activitiesToRegister;
   },
 
+  // |aAppsToRegister| contains an array of apps to be registered, where
+  // each element is an object in the format of {manifest: foo, app: bar}.
+  _registerActivitiesForApps: function(aAppsToRegister) {
+    // Collect the activities to be registered for root and entry_points.
+    let activitiesToRegister = [];
+    aAppsToRegister.forEach(function (aApp) {
+      let manifest = aApp.manifest;
+      let app = aApp.app;
+      activitiesToRegister.push.apply(activitiesToRegister,
+        this._createActivitiesToRegister(manifest, app, null));
+
+      if (!manifest.entry_points) {
+        return;
+      }
+
+      for (let entryPoint in manifest.entry_points) {
+        activitiesToRegister.push.apply(activitiesToRegister,
+          this._createActivitiesToRegister(manifest, app, entryPoint));
+      }
+    }, this);
+
+    // Send the array carrying all the activities to be registered.
+    cpmm.sendAsyncMessage("Activities:Register", activitiesToRegister);
+  },
+
+  // Better to directly use |_registerActivitiesForApps()| if we have
+  // multiple apps to be registered for activities.
   _registerActivities: function(aManifest, aApp) {
-    this._registerActivitiesForEntryPoint(aManifest, aApp, null);
-
-    if (!aManifest.entry_points) {
-      return;
-    }
-
-    for (let entryPoint in aManifest.entry_points) {
-      this._registerActivitiesForEntryPoint(aManifest, aApp, entryPoint);
-    }
+    this._registerActivitiesForApps([{ manifest: aManifest, app: aApp }]);
   },
 
-  _unregisterActivitiesForEntryPoint: function(aManifest, aApp, aEntryPoint) {
+  // |aEntryPoint| is either the entry_point name or the null in which case we
+  // use the root of the manifest.
+  _createActivitiesToUnregister: function(aManifest, aApp, aEntryPoint) {
+    let activitiesToUnregister = [];
     let root = aManifest;
     if (aEntryPoint && aManifest.entry_points[aEntryPoint]) {
       root = aManifest.entry_points[aEntryPoint];
     }
 
     if (!root.activities) {
-      return;
+      return activitiesToUnregister;
     }
 
     for (let activity in root.activities) {
       let description = root.activities[activity];
-      let json = {
-        "manifest": aApp.manifestURL,
-        "name": activity
+      activitiesToUnregister.push({ "manifest": aApp.manifestURL,
+                                    "name": activity });
+    }
+    return activitiesToUnregister;
+  },
+
+  // |aAppsToUnregister| contains an array of apps to be unregistered, where
+  // each element is an object in the format of {manifest: foo, app: bar}.
+  _unregisterActivitiesForApps: function(aAppsToUnregister) {
+    // Collect the activities to be unregistered for root and entry_points.
+    let activitiesToUnregister = [];
+    aAppsToUnregister.forEach(function (aApp) {
+      let manifest = aApp.manifest;
+      let app = aApp.app;
+      activitiesToUnregister.push.apply(activitiesToUnregister,
+        this._createActivitiesToUnregister(manifest, app, null));
+
+      if (!manifest.entry_points) {
+        return;
       }
-      cpmm.sendAsyncMessage("Activities:Unregister", json);
-    }
+
+      for (let entryPoint in manifest.entry_points) {
+        activitiesToUnregister.push.apply(activitiesToUnregister,
+          this._createActivitiesToUnregister(manifest, app, entryPoint));
+      }
+    }, this);
+
+    // Send the array carrying all the activities to be unregistered.
+    cpmm.sendAsyncMessage("Activities:Unregister", activitiesToUnregister);
   },
 
+  // Better to directly use |_unregisterActivitiesForApps()| if we have
+  // multiple apps to be unregistered for activities.
   _unregisterActivities: function(aManifest, aApp) {
-    this._unregisterActivitiesForEntryPoint(aManifest, aApp, null);
-
-    if (!aManifest.entry_points) {
-      return;
-    }
-
-    for (let entryPoint in aManifest.entry_points) {
-      this._unregisterActivitiesForEntryPoint(aManifest, aApp, entryPoint);
-    }
-  },
-
-  _initRegisterActivities: function() {
-    this.activitiesToRegister = 0;
-    this.activitiesRegistered = 0;
-    this.allActivitiesSent = false;
+    this._unregisterActivitiesForApps([{ manifest: aManifest, app: aApp }]);
   },
 
   _processManifestForIds: function(aIds) {
-    this._initRegisterActivities();
     this._readManifests(aIds, (function registerManifests(aResults) {
+      let appsToRegister = [];
       aResults.forEach(function registerManifest(aResult) {
         let app = this.webapps[aResult.id];
         let manifest = aResult.manifest;
         app.name = manifest.name;
+        app.csp = manifest.csp || "";
         this._registerSystemMessages(manifest, app);
-        this._registerActivities(manifest, app);
+        appsToRegister.push({ manifest: manifest, app: app });
       }, this);
-      this.allActivitiesSent = true;
+      this._registerActivitiesForApps(appsToRegister);
     }).bind(this));
   },
 #endif
@@ -433,14 +486,14 @@ let DOMApplicationRegistry = {
             aCallback(data);
         } catch (ex) {
           Cu.reportError("DOMApplicationRegistry: Could not parse JSON: " +
-                         aFile.path + " " + ex);
+                         aFile.path + " " + ex + "\n" + ex.stack);
           if (aCallback)
             aCallback(null);
         }
       });
     } catch (ex) {
       Cu.reportError("DOMApplicationRegistry: Could not read from " +
-                     aFile.path + " : " + ex);
+                     aFile.path + " : " + ex + "\n" + ex.stack);
       if (aCallback)
         aCallback(null);
     }
@@ -451,21 +504,65 @@ let DOMApplicationRegistry = {
       if (!(aMsgName in this.children)) {
         this.children[aMsgName] = [];
       }
-      this.children[aMsgName].push(aMm);
+
+      let mmFound = this.children[aMsgName].some(function(mmRef) {
+        if (mmRef.mm === aMm) {
+          mmRef.refCount++;
+          return true;
+        }
+        return false;
+      });
+
+      if (!mmFound) {
+        this.children[aMsgName].push({
+          mm: aMm,
+          refCount: 1
+        });
+      }
     }, this);
   },
 
+  removeMessageListener: function(aMsgNames, aMm) {
+    if (aMsgNames.length === 1 &&
+        aMsgNames[0] === "Webapps:Internal:AllMessages") {
+      for (let i = this.children.length - 1; i >= 0; i -= 1) {
+        let msg = this.children[i];
 
-  removeMessageListener: function(aMm) {
-    for (let i = this.children.length - 1; i >= 0; i -= 1) {
-      msg = this.children[i];
+        for (let mmI = msg.length - 1; mmI >= 0; mmI -= 1) {
+          let mmRef = msg[mmI];
+          if (mmRef.mm === aMm) {
+            msg.splice(mmI, 1);
+          }
+        }
 
-      let index;
-      if ((index = msg.indexOf(aMm)) != -1) {
-         debug("Remove dead mm at index " + index);
-         msg.splice(index, 1);
+        if (msg.length === 0) {
+          this.children.splice(i, 1);
+        }
       }
-    };
+      return;
+    }
+
+    aMsgNames.forEach(function(aMsgName) {
+      if (!(aMsgName in this.children)) {
+        return;
+      }
+
+      let removeIndex;
+      this.children[aMsgName].some(function(mmRef, index) {
+        if (mmRef.mm === aMm) {
+          mmRef.refCount--;
+          if (mmRef.refCount === 0) {
+            removeIndex = index;
+          }
+          return true;
+        }
+        return false;
+      });
+
+      if (removeIndex) {
+        this.children[aMsgName].splice(removeIndex, 1);
+      }
+    }, this);
   },
 
   receiveMessage: function(aMessage) {
@@ -529,6 +626,12 @@ let DOMApplicationRegistry = {
       case "Webapps:RegisterForMessages":
         this.addMessageListener(msg, mm);
         break;
+      case "Webapps:UnregisterForMessages":
+        this.removeMessageListener(msg, mm);
+        break;
+      case "child-process-shutdown":
+        this.removeMessageListener(["Webapps:Internal:AllMessages"], mm);
+        break;
       case "Webapps:GetList":
         this.addMessageListener(["Webapps:AddApp", "Webapps:RemoveApp"], mm);
         return this.webapps;
@@ -545,14 +648,7 @@ let DOMApplicationRegistry = {
         this.ApplyDownload(msg.manifestURL);
         break;
       case "Activities:Register:OK":
-        this.activitiesRegistered++;
-        if (this.allActivitiesSent &&
-            this.activitiesRegistered === this.activitiesToRegister) {
-          this.notifyAppsRegistryReady();
-        }
-        break;
-      case "child-process-shutdown":
-        this.removeMessageListener(mm);
+        this.notifyAppsRegistryReady();
         break;
     }
   },
@@ -567,20 +663,9 @@ let DOMApplicationRegistry = {
     if (!(aMsgName in this.children)) {
       return;
     }
-    let i;
-    for (i = this.children[aMsgName].length - 1; i >= 0; i -= 1) {
-      let msgMgr = this.children[aMsgName][i];
-      try {
-        msgMgr.sendAsyncMessage(aMsgName, aContent);
-      } catch (e) {
-        // Remove once 777508 lands.
-        let index;
-        if ((index = this.children[aMsgName].indexOf(msgMgr)) != -1) {
-          this.children[aMsgName].splice(index, 1);
-          dump("Remove dead MessageManager!\n");
-        }
-      }
-    };
+    this.children[aMsgName].forEach(function(mmRef) {
+      mmRef.mm.sendAsyncMessage(aMsgName, aContent);
+    });
   },
 
   _getAppDir: function(aId) {
@@ -751,6 +836,8 @@ let DOMApplicationRegistry = {
 
   checkForUpdate: function(aData, aMm) {
     let app = this.getAppByManifestURL(aData.manifestURL);
+    let installOrigin = app.installOrigin;
+
     if (!app) {
       aData.error = "NO_SUCH_APP";
       aMm.sendAsyncMessage("Webapps:CheckForUpdate:Return:KO", aData);
@@ -786,12 +873,10 @@ let DOMApplicationRegistry = {
       // Update the web apps' registration.
       this.notifyAppsRegistryStart();
 #ifdef MOZ_SYS_MSG
-      this._initRegisterActivities();
       this._readManifests([{ id: id }], (function unregisterManifest(aResult) {
         this._unregisterActivities(aResult[0].manifest, app);
         this._registerSystemMessages(aManifest, app);
         this._registerActivities(aManifest, app);
-        this.allActivitiesSent = true;
       }).bind(this));
 #else
       // Nothing else to do but notifying we're ready.
@@ -820,6 +905,7 @@ let DOMApplicationRegistry = {
       }
 
       app.name = aManifest.name;
+      app.csp = aManifest.csp || "";
 
       // Update the registry.
       this.webapps[id] = app;
@@ -850,7 +936,7 @@ let DOMApplicationRegistry = {
       if (xhr.status == 200) {
         let manifest;
         try {
-          JSON.parse(xhr.responseText, installOrigin);
+          manifest = JSON.parse(xhr.responseText);
         } catch(e) {
           sendError("MANIFEST_PARSE_ERROR");
           return;
@@ -973,6 +1059,7 @@ let DOMApplicationRegistry = {
     }
 
     appObject.name = manifest.name;
+    appObject.csp = manifest.csp || "";
 
     this.webapps[id] = appObject;
 
@@ -999,10 +1086,8 @@ let DOMApplicationRegistry = {
     if (!aData.isPackage) {
       this.notifyAppsRegistryStart();
 #ifdef MOZ_SYS_MSG
-      this._initRegisterActivities();
       this._registerSystemMessages(app.manifest, app);
       this._registerActivities(app.manifest, app);
-      this.allActivitiesSent = true;
 #else
       // Nothing else to do but notifying we're ready.
       this.notifyAppsRegistryReady();
@@ -1444,6 +1529,11 @@ let DOMApplicationRegistry = {
     return AppsUtils.getAppByManifestURL(this.webapps, aManifestURL);
   },
 
+  getCSPByLocalId: function(aLocalId) {
+    debug("getCSPByLocalId:" + aLocalId);
+    return AppsUtils.getCSPByLocalId(this.webapps, aLocalId);
+  },
+
   getAppByLocalId: function(aLocalId) {
     return AppsUtils.getAppByLocalId(this.webapps, aLocalId);
   },
@@ -1646,6 +1736,10 @@ let DOMApplicationRegistry = {
     switch (message.name) {
       case "Webapps:ClearBrowserData":
         this._clearPrivateData(appId, true);
+        // XXXbent This is a hack until bug 802366 is fixed. Currently all data
+        //         loaded in mozbrowser frames within an app believe that their
+        //         appId is 0.
+        this._clearPrivateData(0, true);
         break;
     }
   },

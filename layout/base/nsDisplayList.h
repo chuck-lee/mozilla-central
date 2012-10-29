@@ -582,6 +582,9 @@ public:
     return aItem == mGlassDisplayItem;
   }
 
+  void SetContainsPluginItem() { mContainsPluginItem = true; }
+  bool ContainsPluginItem() { return mContainsPluginItem; }
+
 private:
   void MarkOutOfFlowFrameForDisplay(nsIFrame* aDirtyFrame, nsIFrame* aFrame,
                                     const nsRect& aDirtyRect);
@@ -635,6 +638,7 @@ private:
   bool                           mHasFixedItems;
   bool                           mIsInFixedPosition;
   bool                           mIsCompositingCheap;
+  bool                           mContainsPluginItem;
 };
 
 class nsDisplayItem;
@@ -688,6 +692,8 @@ public:
     if (aFrame) {
       mReferenceFrame = aBuilder->FindReferenceFrameFor(aFrame);
       mToReferenceFrame = aBuilder->ToReferenceFrame(aFrame);
+    } else {
+      mReferenceFrame = nullptr;
     }
   }
   nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
@@ -1293,6 +1299,7 @@ public:
    * @return true if any item in the list is visible.
    */
   bool ComputeVisibilityForSublist(nsDisplayListBuilder* aBuilder,
+                                   nsDisplayItem* aForItem,
                                    nsRegion* aVisibleRegion,
                                    const nsRect& aListVisibleBounds,
                                    const nsRect& aAllowVisibleRegionExpansion);

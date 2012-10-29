@@ -1661,26 +1661,10 @@ bool
 nsDocShell::ValidateOrigin(nsIDocShellTreeItem* aOriginTreeItem,
                            nsIDocShellTreeItem* aTargetTreeItem)
 {
-    nsCOMPtr<nsIScriptSecurityManager> securityManager =
-        do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID);
-    NS_ENSURE_TRUE(securityManager, false);
-
-    nsCOMPtr<nsIPrincipal> subjectPrincipal;
-    nsresult rv =
-        securityManager->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
-    NS_ENSURE_SUCCESS(rv, false);
-
-    if (subjectPrincipal) {
-        // We're called from JS, check if UniversalXPConnect is
-        // enabled.
-        bool ubwEnabled = false;
-        rv = securityManager->IsCapabilityEnabled("UniversalXPConnect",
-                                                  &ubwEnabled);
-        NS_ENSURE_SUCCESS(rv, false);
-
-        if (ubwEnabled) {
-            return true;
-        }
+    // We want to bypass this check for chrome callers, but only if there's
+    // JS on the stack. System callers still need to do it.
+    if (nsContentUtils::GetCurrentJSContext() && nsContentUtils::IsCallerChrome()) {
+        return true;
     }
 
     // Get origin document principal
@@ -1692,8 +1676,8 @@ nsDocShell::ValidateOrigin(nsIDocShellTreeItem* aOriginTreeItem,
     NS_ENSURE_TRUE(targetDocument, false);
 
     bool equal;
-    rv = originDocument->NodePrincipal()->
-            Equals(targetDocument->NodePrincipal(), &equal);
+    nsresult rv = originDocument->NodePrincipal()->Equals(targetDocument->NodePrincipal(),
+                                                          &equal);
     if (NS_SUCCEEDED(rv) && equal) {
         return true;
     }
@@ -6425,11 +6409,14 @@ nsDocShell::OnRedirectStateChange(nsIChannel* aOldChannel,
     nsCOMPtr<nsIApplicationCacheChannel> appCacheChannel =
         do_QueryInterface(aNewChannel);
     if (appCacheChannel) {
-        // Permission will be checked in the parent process.
-        if (GeckoProcessType_Default != XRE_GetProcessType())
+        if (GeckoProcessType_Default != XRE_GetProcessType()) {
+            // Permission will be checked in the parent process.
             appCacheChannel->SetChooseApplicationCache(true);
-        else
-            appCacheChannel->SetChooseApplicationCache(ShouldCheckAppCache(newURI));
+        } else {
+            appCacheChannel->SetChooseApplicationCache(
+                                NS_ShouldCheckAppCache(newURI,
+                                                       mInPrivateBrowsing));
+        }
     }
 
     if (!(aRedirectFlags & nsIChannelEventSink::REDIRECT_INTERNAL) && 
@@ -8184,21 +8171,13 @@ nsDocShell::CheckLoadingPermissions()
         return rv;
     }
 
+    nsCOMPtr<nsIScriptSecurityManager> securityManager =
+      do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
+    NS_ENSURE_SUCCESS(rv, rv);
+
     // We're a frame. Check that the caller has write permission to
     // the parent before allowing it to load anything into this
     // docshell.
-
-    nsCOMPtr<nsIScriptSecurityManager> securityManager =
-        do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    bool ubwEnabled = false;
-    rv = securityManager->IsCapabilityEnabled("UniversalXPConnect",
-                                              &ubwEnabled);
-    if (NS_FAILED(rv) || ubwEnabled) {
-        return rv;
-    }
-
     nsCOMPtr<nsIPrincipal> subjPrincipal;
     rv = securityManager->GetSubjectPrincipal(getter_AddRefs(subjPrincipal));
     NS_ENSURE_TRUE(NS_SUCCEEDED(rv) && subjPrincipal, rv);
@@ -9169,26 +9148,6 @@ nsDocShell::GetInheritedPrincipal(bool aConsiderCurrentDocument)
     return nullptr;
 }
 
-bool
-nsDocShell::ShouldCheckAppCache(nsIURI *aURI)
-{
-    if (mInPrivateBrowsing) {
-        return false;
-    }
-
-    nsCOMPtr<nsIOfflineCacheUpdateService> offlineService =
-        do_GetService(NS_OFFLINECACHEUPDATESERVICE_CONTRACTID);
-    if (!offlineService) {
-        return false;
-    }
-
-    bool allowed;
-    nsresult rv = offlineService->OfflineAppAllowedForURI(aURI,
-                                                          nullptr,
-                                                          &allowed);
-    return NS_SUCCEEDED(rv) && allowed;
-}
-
 nsresult
 nsDocShell::DoURILoad(nsIURI * aURI,
                       nsIURI * aReferrerURI,
@@ -9276,12 +9235,13 @@ nsDocShell::DoURILoad(nsIURI * aURI,
 
         // Loads with the correct permissions should check for a matching
         // application cache.
-        // Permission will be checked in the parent process
-        if (GeckoProcessType_Default != XRE_GetProcessType())
+        if (GeckoProcessType_Default != XRE_GetProcessType()) {
+            // Permission will be checked in the parent process
             appCacheChannel->SetChooseApplicationCache(true);
-        else
+        } else {
             appCacheChannel->SetChooseApplicationCache(
-                ShouldCheckAppCache(aURI));
+                NS_ShouldCheckAppCache(aURI, mInPrivateBrowsing));
+        }
     }
 
     // Make sure to give the caller a channel if we managed to create one
@@ -11378,26 +11338,14 @@ NS_IMETHODIMP nsDocShell::EnsureFind()
     NS_ENSURE_TRUE(scriptGO, NS_ERROR_UNEXPECTED);
 
     // default to our window
-    nsCOMPtr<nsIDOMWindow> windowToSearch(do_QueryInterface(mScriptGlobal));
-
-    nsCOMPtr<nsIDocShellTreeItem> root;
-    GetRootTreeItem(getter_AddRefs(root));
-
-    // if the active window is the same window that this docshell is in,
-    // use the currently focused frame
-    nsCOMPtr<nsIDOMWindow> rootWindow = do_GetInterface(root);
-    nsCOMPtr<nsIFocusManager> fm = do_GetService(FOCUSMANAGER_CONTRACTID);
-    if (fm) {
-      nsCOMPtr<nsIDOMWindow> activeWindow;
-      fm->GetActiveWindow(getter_AddRefs(activeWindow));
-      if (activeWindow == rootWindow)
-        fm->GetFocusedWindow(getter_AddRefs(windowToSearch));
-    }
+    nsCOMPtr<nsPIDOMWindow> ourWindow = do_QueryInterface(scriptGO);
+    nsCOMPtr<nsPIDOMWindow> windowToSearch;
+    nsFocusManager::GetFocusedDescendant(ourWindow, true, getter_AddRefs(windowToSearch));
 
     nsCOMPtr<nsIWebBrowserFindInFrames> findInFrames = do_QueryInterface(mFind);
     if (!findInFrames) return NS_ERROR_NO_INTERFACE;
     
-    rv = findInFrames->SetRootSearchFrame(rootWindow);
+    rv = findInFrames->SetRootSearchFrame(ourWindow);
     if (NS_FAILED(rv)) return rv;
     rv = findInFrames->SetCurrentSearchFrame(windowToSearch);
     if (NS_FAILED(rv)) return rv;

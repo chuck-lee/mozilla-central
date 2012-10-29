@@ -251,6 +251,7 @@ Section "Uninstall"
   ${MUI_INSTALLOPTIONS_READ} $0 "unconfirm.ini" "Field 3" "State"
   ${If} "$0" == "1"
     ${un.DeleteRelativeProfiles} "Mozilla\Firefox"
+    ${un.DeleteRelativeProfiles} "Mozilla\MetroFirefox"
     RmDir "$APPDATA\Mozilla\Extensions\{ec8030f7-c20a-464f-9b0e-13a3a9e97384}"
     RmDir "$APPDATA\Mozilla\Extensions"
     RmDir "$APPDATA\Mozilla"
@@ -665,6 +666,10 @@ FunctionEnd
 # Initialization Functions
 
 Function .onInit
+  ; Remove the current exe directory from the search order.
+  ; This only effects LoadLibrary calls and not implicitly loaded DLLs.
+  System::Call 'kernel32::SetDllDirectoryW(w "")'
+
   ; We need this set up for most of the helper.exe operations.
   !ifdef AppName
   ${InitHashAppModelId} "$INSTDIR" "Software\Mozilla\${AppName}\TaskBarIDs"
@@ -673,6 +678,10 @@ Function .onInit
 FunctionEnd
 
 Function un.onInit
+  ; Remove the current exe directory from the search order.
+  ; This only effects LoadLibrary calls and not implicitly loaded DLLs.
+  System::Call 'kernel32::SetDllDirectoryW(w "")'
+
   StrCpy $LANGUAGE 0
 
   ${un.UninstallUnOnInitCommon}

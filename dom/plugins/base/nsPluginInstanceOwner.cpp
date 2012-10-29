@@ -57,6 +57,7 @@ using mozilla::DefaultXDisplay;
 #include "nsIScrollableFrame.h"
 #include "nsIDocShell.h"
 #include "ImageContainer.h"
+#include "nsIDOMHTMLCollection.h"
 
 #include "nsContentCID.h"
 #include "nsWidgetsCID.h"
@@ -167,13 +168,18 @@ static void OnDestroyImage(void* aPluginInstanceOwner)
 already_AddRefed<ImageContainer>
 nsPluginInstanceOwner::GetImageContainer()
 {
+  if (!mInstance)
+    return nullptr;
+
+  nsRefPtr<ImageContainer> container;
+
 #if MOZ_WIDGET_ANDROID
   // Right now we only draw with Gecko layers on Honeycomb and higher. See Paint()
   // for what we do on other versions.
   if (AndroidBridge::Bridge()->GetAPIVersion() < 11)
     return NULL;
   
-  nsRefPtr<ImageContainer> container = LayerManager::CreateImageContainer();
+  container = LayerManager::CreateImageContainer();
 
   ImageFormat format = ImageFormat::SHARED_TEXTURE;
   nsRefPtr<Image> img = container->CreateImage(&format, 1);
@@ -199,24 +205,21 @@ nsPluginInstanceOwner::GetImageContainer()
   return container.forget();
 #endif
 
-  if (mInstance) {
-    nsRefPtr<ImageContainer> container;
-    // Every call to nsIPluginInstance::GetImage() creates
-    // a new image.  See nsIPluginInstance.idl.
-    mInstance->GetImageContainer(getter_AddRefs(container));
-    if (container) {
+  // Every call to nsIPluginInstance::GetImage() creates
+  // a new image.  See nsIPluginInstance.idl.
+  mInstance->GetImageContainer(getter_AddRefs(container));
+  if (container) {
 #ifdef XP_MACOSX
-      AutoLockImage autoLock(container);
-      Image* image = autoLock.GetImage();
-      if (image && image->GetFormat() == MAC_IO_SURFACE && mObjectFrame) {
-        MacIOSurfaceImage *oglImage = static_cast<MacIOSurfaceImage*>(image);
-        NS_ADDREF_THIS();
-        oglImage->SetUpdateCallback(&DrawPlugin, this);
-        oglImage->SetDestroyCallback(&OnDestroyImage);
-      }
-#endif
-      return container.forget();
+    AutoLockImage autoLock(container);
+    Image* image = autoLock.GetImage();
+    if (image && image->GetFormat() == MAC_IO_SURFACE && mObjectFrame) {
+      MacIOSurfaceImage *oglImage = static_cast<MacIOSurfaceImage*>(image);
+      NS_ADDREF_THIS();
+      oglImage->SetUpdateCallback(&DrawPlugin, this);
+      oglImage->SetDestroyCallback(&OnDestroyImage);
     }
+#endif
+    return container.forget();
   }
   return nullptr;
 }
@@ -1142,7 +1145,7 @@ nsresult nsPluginInstanceOwner::EnsureCachedAttrParamArrays()
   // Making DOM method calls can cause our frame to go away.
   nsCOMPtr<nsIPluginInstanceOwner> kungFuDeathGrip(this);
 
-  nsCOMPtr<nsIDOMNodeList> allParams;
+  nsCOMPtr<nsIDOMHTMLCollection> allParams;
   NS_NAMED_LITERAL_STRING(xhtml_ns, "http://www.w3.org/1999/xhtml");
   mydomElement->GetElementsByTagNameNS(xhtml_ns, NS_LITERAL_STRING("param"),
                                        getter_AddRefs(allParams));
@@ -2712,8 +2715,8 @@ void nsPluginInstanceOwner::Paint(const nsRect& aDirtyRect, HPS aHPS)
 
   NPEvent pluginEvent;
   pluginEvent.event = WM_PAINT;
-  pluginEvent.wParam = (uint32)aHPS;
-  pluginEvent.lParam = (uint32)&rectl;
+  pluginEvent.wParam = (uint32_t)aHPS;
+  pluginEvent.lParam = (uint32_t)&rectl;
   mInstance->HandleEvent(&pluginEvent, nullptr);
 }
 #endif

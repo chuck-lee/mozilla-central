@@ -19,6 +19,7 @@ webidl_files = \
   CanvasRenderingContext2D.webidl \
   ClientRectList.webidl \
   CSSStyleDeclaration.webidl \
+  DOMImplementation.webidl \
   DOMTokenList.webidl \
   DOMSettableTokenList.webidl \
   Function.webidl \
@@ -30,6 +31,7 @@ webidl_files = \
   HTMLCollection.webidl \
   HTMLOptionsCollection.webidl \
   HTMLPropertiesCollection.webidl \
+  ImageData.webidl \
   NodeList.webidl \
   PaintRequestList.webidl \
   Performance.webidl \
@@ -71,6 +73,7 @@ ifdef ENABLE_TESTS
 test_webidl_files := \
   TestCodeGen.webidl \
   TestDictionary.webidl \
+  TestExampleGen.webidl \
   TestTypedef.webidl \
   $(NULL)
 else

@@ -358,6 +358,7 @@ pref("toolkit.telemetry.infoURL", "http://www.mozilla.com/legal/privacy/firefox.
 pref("toolkit.telemetry.debugSlowSql", false);
 
 // Identity module
+pref("toolkit.identity.enabled", false);
 pref("toolkit.identity.debug", false);
 
 // Disable remote debugging protocol logging
@@ -681,7 +682,6 @@ pref("dom.min_background_timeout_value", 1000);
 
 // Use the new DOM bindings (only affects any scopes created after the pref is
 // changed)
-pref("dom.new_bindings", true);
 pref("dom.experimental_bindings", true);
 
 // Don't use new input types
@@ -709,7 +709,6 @@ pref("javascript.options.strict",           false);
 #ifdef DEBUG
 pref("javascript.options.strict.debug",     true);
 #endif
-pref("javascript.options.relimit",          true);
 pref("javascript.options.methodjit.content", true);
 pref("javascript.options.methodjit.chrome",  true);
 pref("javascript.options.ion.content",      true);
@@ -742,6 +741,7 @@ pref("javascript.options.mem.gc_high_frequency_heap_growth_min", 150);
 pref("javascript.options.mem.gc_low_frequency_heap_growth", 150);
 pref("javascript.options.mem.gc_dynamic_heap_growth", true);
 pref("javascript.options.mem.gc_dynamic_mark_slice", true);
+pref("javascript.options.mem.gc_allocation_threshold_mb", 30);
 
 pref("javascript.options.mem.analysis_purge_mb", 100);
 
@@ -921,7 +921,7 @@ pref("network.http.spdy.chunk-size", 4096);
 pref("network.http.spdy.timeout", 180);
 pref("network.http.spdy.coalesce-hostnames", true);
 pref("network.http.spdy.use-alternate-protocol", true);
-pref("network.http.spdy.ping-threshold", 44);
+pref("network.http.spdy.ping-threshold", 58);
 pref("network.http.spdy.ping-timeout", 8);
 pref("network.http.spdy.send-buffer-size", 131072);
 
@@ -1611,6 +1611,12 @@ pref("layout.css.supports-rule.enabled", true);
 // Is support for CSS Flexbox enabled?
 pref("layout.css.flexbox.enabled", false);
 
+// Are sets of prefixed properties supported?
+pref("layout.css.prefixes.border-image", true);
+pref("layout.css.prefixes.transforms", true);
+pref("layout.css.prefixes.transitions", true);
+pref("layout.css.prefixes.animations", true);
+
 // pref for which side vertical scrollbars should be on
 // 0 = end-side in UI direction
 // 1 = end-side in document/content direction
@@ -1816,6 +1822,19 @@ pref("font.size.inflation.lineThreshold", 400);
  * large enough. This means that when s=0, i is always equal to m.
  */
 pref("font.size.inflation.mappingIntercept", 1);
+
+
+/*
+ * This controls the percentage that fonts will be inflated, if font
+ * size inflation is enabled. Essentially, if we have a specified font
+ * size, s, and an inflated font size, i, this specifies that the ratio
+ * i/s * 100 should never exceed the value of this preference.
+ *
+ * In order for this preference to have any effect, its value must be
+ * greater than 100, since font inflation can never decrease the ratio
+ * i/s.
+ */
+pref("font.size.inflation.maxRatio", 0);
 
 /*
  * When enabled, the touch.radius and mouse.radius prefs allow events to be dispatched
@@ -3739,8 +3758,9 @@ pref("dom.mozSettings.enabled", false);
 pref("dom.mozPermissionSettings.enabled", false);
 
 // W3C touch events
+// 0 - disabled, 1 - enabled, 2 - autodetect (win)
 #ifdef XP_WIN
-pref("dom.w3c_touch_events.enabled", true);
+pref("dom.w3c_touch_events.enabled", 2);
 #endif
 
 // enable JS dump() function.
@@ -3785,8 +3805,6 @@ pref("social.enabled", false);
 // observers (bug 780507).
 pref("dom.idle-observers-api.fuzz_time.disabled", true);
 
-pref("toolkit.identity.debug", false);
-
 // Setting that to true grant elevated privileges to apps that ask
 // for them in their manifest.
 pref("dom.mozApps.dev_mode", false);
@@ -3799,3 +3817,7 @@ pref("dom.mozApps.maxLocalId", 1000);
 // they are handled separately. This pref is only read once at startup:
 // a restart is required to enable a new value.
 pref("network.activity.blipIntervalMilliseconds", 0);
+
+// When we're asked to take a screenshot, don't wait more than 2000ms for the
+// event loop to become idle before actually taking the screenshot.
+pref("dom.browserElement.maxScreenshotDelayMS", 2000);

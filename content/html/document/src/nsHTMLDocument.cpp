@@ -313,11 +313,7 @@ nsHTMLDocument::CreateShell(nsPresContext* aContext,
                        aInstancePtrResult);
 }
 
-// The following Try*Charset will return false only if the charset source
-// should be considered (ie. aCharsetSource < thisCharsetSource) but we failed
-// to get the charset from this source.
-
-bool
+void
 nsHTMLDocument::TryHintCharset(nsIMarkupDocumentViewer* aMarkupDV,
                                int32_t& aCharsetSource, nsACString& aCharset)
 {
@@ -331,17 +327,17 @@ nsHTMLDocument::TryHintCharset(nsIMarkupDocumentViewer* aMarkupDV,
       aMarkupDV->SetHintCharacterSetSource((int32_t)(kCharsetUninitialized));
 
       if(requestCharsetSource <= aCharsetSource)
-        return true;
+        return;
 
-      if(NS_SUCCEEDED(rv)) {
+      if(NS_SUCCEEDED(rv) && IsAsciiCompatible(requestCharset)) {
         aCharsetSource = requestCharsetSource;
         aCharset = requestCharset;
 
-        return true;
+        return;
       }
     }
   }
-  return false;
+  return;
 }
 
 
@@ -361,6 +357,8 @@ nsHTMLDocument::TryUserForcedCharset(nsIMarkupDocumentViewer* aMarkupDV,
     rv = aMarkupDV->GetForceCharacterSet(forceCharsetFromDocShell);
   }
 
+  // Not making the IsAsciiCompatible() check here to allow the user to
+  // force UTF-16 from the menu.
   if(NS_SUCCEEDED(rv) && !forceCharsetFromDocShell.IsEmpty()) {
     aCharset = forceCharsetFromDocShell;
     //TODO: we should define appropriate constant for force charset
@@ -392,7 +390,12 @@ nsHTMLDocument::TryCacheCharset(nsICachingChannel* aCachingChannel,
 
   nsCString cachedCharset;
   rv = aCachingChannel->GetCacheTokenCachedCharset(cachedCharset);
-  if (NS_SUCCEEDED(rv) && !cachedCharset.IsEmpty())
+  // Check IsAsciiCompatible() even in the cache case, because the value
+  // might be stale and in the case of a stale charset that is not a rough
+  // ASCII superset, the parser has no way to recover.
+  if (NS_SUCCEEDED(rv) &&
+      !cachedCharset.IsEmpty() &&
+      IsAsciiCompatible(cachedCharset))
   {
     aCharset = cachedCharset;
     aCharsetSource = kCharsetFromCache;
@@ -417,69 +420,87 @@ CheckSameOrigin(nsINode* aNode1, nsINode* aNode2)
 }
 
 bool
+nsHTMLDocument::IsAsciiCompatible(const nsACString& aPreferredName)
+{
+  return !(aPreferredName.LowerCaseEqualsLiteral("utf-16") ||
+           aPreferredName.LowerCaseEqualsLiteral("utf-16be") ||
+           aPreferredName.LowerCaseEqualsLiteral("utf-16le") ||
+           aPreferredName.LowerCaseEqualsLiteral("utf-7") ||
+           aPreferredName.LowerCaseEqualsLiteral("x-imap4-modified-utf7"));
+}
+
+void
 nsHTMLDocument::TryParentCharset(nsIDocShell*  aDocShell,
                                  nsIDocument* aParentDocument,
                                  int32_t& aCharsetSource,
                                  nsACString& aCharset)
 {
-  if (aDocShell) {
-    int32_t source;
-    nsCOMPtr<nsIAtom> csAtom;
-    int32_t parentSource;
-    aDocShell->GetParentCharsetSource(&parentSource);
-    if (kCharsetFromParentForced <= parentSource)
-      source = kCharsetFromParentForced;
-    else if (kCharsetFromHintPrevDoc == parentSource) {
-      // Make sure that's OK
-      if (!aParentDocument || !CheckSameOrigin(this, aParentDocument)) {
-        return false;
-      }
-      
-      // if parent is posted doc, set this prevent autodections
-      // I'm not sure this makes much sense... but whatever.
-      source = kCharsetFromHintPrevDoc;
-    }
-    else if (kCharsetFromCache <= parentSource) {
-      // Make sure that's OK
-      if (!aParentDocument || !CheckSameOrigin(this, aParentDocument)) {
-        return false;
-      }
-
-      source = kCharsetFromParentFrame;
-    }
-    else
-      return false;
-
-    if (source < aCharsetSource)
-      return true;
-
-    aDocShell->GetParentCharset(getter_AddRefs(csAtom));
-    if (csAtom) {
-      csAtom->ToUTF8String(aCharset);
-      aCharsetSource = source;
-      return true;
-    }
+  if (!aDocShell) {
+    return;
   }
-  return false;
+  int32_t source;
+  nsCOMPtr<nsIAtom> csAtom;
+  int32_t parentSource;
+  nsAutoCString parentCharset;
+  aDocShell->GetParentCharset(getter_AddRefs(csAtom));
+  if (!csAtom) {
+    return;
+  }
+  aDocShell->GetParentCharsetSource(&parentSource);
+  csAtom->ToUTF8String(parentCharset);
+  if (kCharsetFromParentForced <= parentSource) {
+    source = kCharsetFromParentForced;
+  } else if (kCharsetFromHintPrevDoc == parentSource) {
+    // Make sure that's OK
+    if (!aParentDocument ||
+        !CheckSameOrigin(this, aParentDocument) ||
+        !IsAsciiCompatible(parentCharset)) {
+      return;
+    }
+
+    // if parent is posted doc, set this prevent autodetections
+    // I'm not sure this makes much sense... but whatever.
+    source = kCharsetFromHintPrevDoc;
+  } else if (kCharsetFromCache <= parentSource) {
+    // Make sure that's OK
+    if (!aParentDocument ||
+        !CheckSameOrigin(this, aParentDocument) ||
+        !IsAsciiCompatible(parentCharset)) {
+      return;
+    }
+
+    source = kCharsetFromParentFrame;
+  } else {
+    return;
+  }
+
+  if (source < aCharsetSource) {
+    return;
+  }
+
+  aCharset.Assign(parentCharset);
+  aCharsetSource = source;
 }
 
-bool
+void
 nsHTMLDocument::UseWeakDocTypeDefault(int32_t& aCharsetSource,
                                       nsACString& aCharset)
 {
   if (kCharsetFromWeakDocTypeDefault <= aCharsetSource)
-    return true;
-  // fallback value in case docshell return error
-  aCharset.AssignLiteral("ISO-8859-1");
+    return;
 
   const nsAdoptingCString& defCharset =
     Preferences::GetLocalizedCString("intl.charset.default");
 
-  if (!defCharset.IsEmpty()) {
+  // Don't let the user break things by setting intl.charset.default to
+  // not a rough ASCII superset
+  if (!defCharset.IsEmpty() && IsAsciiCompatible(defCharset)) {
     aCharset = defCharset;
-    aCharsetSource = kCharsetFromWeakDocTypeDefault;
+  } else {
+    aCharset.AssignLiteral("ISO-8859-1");
   }
-  return true;
+  aCharsetSource = kCharsetFromWeakDocTypeDefault;
+  return;
 }
 
 bool
@@ -494,6 +515,8 @@ nsHTMLDocument::TryDefaultCharset( nsIMarkupDocumentViewer* aMarkupDV,
   if (aMarkupDV) {
     nsresult rv =
       aMarkupDV->GetDefaultCharacterSet(defaultCharsetFromDocShell);
+    // Not making the IsAsciiCompatible() check here to allow the user to
+    // force UTF-16 from the menu.
     if(NS_SUCCEEDED(rv)) {
       aCharset = defaultCharsetFromDocShell;
 
@@ -1017,7 +1040,7 @@ nsHTMLDocument::GetBody()
   nsRefPtr<nsContentList> nodeList =
     NS_GetContentList(this, kNameSpaceID_XHTML, NS_LITERAL_STRING("frameset"));
 
-  return nodeList->GetNodeAt(0);
+  return nodeList->Item(0);
 }
 
 NS_IMETHODIMP
@@ -2073,7 +2096,7 @@ nsHTMLDocument::ResolveName(const nsAString& aName,
       // Only one element in the list, return the element instead of
       // returning the list
 
-      nsIContent *node = list->GetNodeAt(0);
+      nsIContent *node = list->Item(0);
       if (!aForm || nsContentUtils::BelongsInForm(aForm, node)) {
         NS_ADDREF(*aResult = node);
         *aCache = node;
@@ -2101,7 +2124,7 @@ nsHTMLDocument::ResolveName(const nsAString& aName,
         // nothing or one element in the list.  Return that element, or null
         // if there's no element in the list.
 
-        nsIContent *node = fc_list->GetNodeAt(0);
+        nsIContent *node = fc_list->Item(0);
 
         NS_IF_ADDREF(*aResult = node);
         *aCache = node;
@@ -2778,7 +2801,7 @@ nsHTMLDocument::SetDesignMode(const nsAString & aDesignMode)
 {
   nsresult rv = NS_OK;
 
-  if (!nsContentUtils::IsCallerTrustedForWrite()) {
+  if (!nsContentUtils::IsCallerChrome()) {
     nsCOMPtr<nsIPrincipal> subject;
     nsIScriptSecurityManager *secMan = nsContentUtils::GetSecurityManager();
     rv = secMan->GetSubjectPrincipal(getter_AddRefs(subject));

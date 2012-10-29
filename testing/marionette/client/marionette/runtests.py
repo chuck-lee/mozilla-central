@@ -33,8 +33,10 @@ from marionette_test import MarionetteJSTestCase, MarionetteTestCase
 
 class MarionetteTestResult(unittest._TextTestResult):
 
-    def __init__(self, *args):
-        super(MarionetteTestResult, self).__init__(*args)
+    def __init__(self, *args, **kwargs):
+        self.marionette = kwargs['marionette']
+        del kwargs['marionette']
+        super(MarionetteTestResult, self).__init__(*args, **kwargs)
         self.passed = 0
         self.perfdata = None
         self.tests_passed = []
@@ -88,6 +90,12 @@ class MarionetteTestResult(unittest._TextTestResult):
                 self.stream.writeln("%s" % line)
             self.stream.writeln("TEST-UNEXPECTED-FAIL : %s" % errlines[-1])
 
+    def stopTest(self, *args, **kwargs):
+        unittest._TextTestResult.stopTest(self, *args, **kwargs)
+        if self.marionette.check_for_crash():
+            # this tells unittest.TestSuite not to continue running tests
+            self.shouldStop = True
+
 
 class MarionetteTextTestRunner(unittest.TextTestRunner):
 
@@ -96,10 +104,15 @@ class MarionetteTextTestRunner(unittest.TextTestRunner):
     def __init__(self, **kwargs):
         self.perf = kwargs['perf']
         del kwargs['perf']
+        self.marionette = kwargs['marionette']
+        del kwargs['marionette']
         unittest.TextTestRunner.__init__(self, **kwargs)
 
     def _makeResult(self):
-        return self.resultclass(self.stream, self.descriptions, self.verbosity)
+        return self.resultclass(self.stream,
+                                self.descriptions,
+                                self.verbosity,
+                                marionette=self.marionette)
 
     def run(self, test):
         "Run the given test case or test suite."
@@ -172,7 +185,7 @@ class MarionetteTestRunner(object):
                  es_server=None, rest_server=None, logger=None,
                  testgroup="marionette", noWindow=False, logcat_dir=None,
                  xml_output=None, repeat=0, perf=False, perfserv=None,
-                 gecko_path=None):
+                 gecko_path=None, testvars=None):
         self.address = address
         self.emulator = emulator
         self.emulatorBinary = emulatorBinary
@@ -198,6 +211,15 @@ class MarionetteTestRunner(object):
         self.perf = perf
         self.perfserv = perfserv
         self.gecko_path = gecko_path
+        self.testvars = None
+
+        if testvars is not None:
+            if not os.path.exists(testvars):
+                raise Exception('--testvars file does not exist')
+
+            import json
+            with open(testvars) as f:
+                self.testvars = json.loads(f.read())
 
         # set up test handlers
         self.test_handlers = []
@@ -350,7 +372,7 @@ class MarionetteTestRunner(object):
         if not self.httpd:
             print "starting httpd"
             self.start_httpd()
-        
+
         if not self.marionette:
             self.start_marionette()
 
@@ -363,6 +385,8 @@ class MarionetteTestRunner(object):
                         (filename.endswith('.py') or filename.endswith('.js'))):
                         filepath = os.path.join(root, filename)
                         self.run_test(filepath, testtype)
+                        if self.marionette.check_for_crash():
+                            return
             return
 
         mod_name,file_ext = os.path.splitext(os.path.split(filepath)[-1])
@@ -413,17 +437,22 @@ class MarionetteTestRunner(object):
 
             for i in manifest_tests:
                 self.run_test(i["path"], testtype)
+                if self.marionette.check_for_crash():
+                    return
             return
 
         self.logger.info('TEST-START %s' % os.path.basename(test))
 
         for handler in self.test_handlers:
             if handler.match(os.path.basename(test)):
-                handler.add_tests_to_suite(mod_name, filepath, suite, testloader, self.marionette)
+                handler.add_tests_to_suite(mod_name, filepath, suite, testloader, self.marionette, self.testvars)
                 break
 
         if suite.countTestCases():
-            results = MarionetteTextTestRunner(verbosity=3, perf=self.perf).run(suite)
+            runner = MarionetteTextTestRunner(verbosity=3,
+                                              perf=self.perf,
+                                              marionette=self.marionette)
+            results = runner.run(suite)
             self.results.append(results)
 
             self.failed += len(results.failures) + len(results.errors)
@@ -612,6 +641,9 @@ def parse_options():
                       default=None,
                       help='path to B2G gecko binaries that should be '
                       'installed on the device or emulator')
+    parser.add_option('--testvars', dest='testvars', action='store',
+                      default=None,
+                     help='path to a JSON file with any test data required')
 
     options, tests = parser.parse_args()
 
@@ -662,7 +694,8 @@ def startTestRunner(runner_class, options, tests):
                           repeat=options.repeat,
                           perf=options.perf,
                           perfserv=options.perfserv,
-                          gecko_path=options.gecko_path)
+                          gecko_path=options.gecko_path,
+                          testvars=options.testvars)
     runner.run_tests(tests, testtype=options.type)
     return runner
 

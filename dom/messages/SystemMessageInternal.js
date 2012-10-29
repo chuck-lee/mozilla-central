@@ -30,6 +30,7 @@ try {
 }
 
 const kMessages =["SystemMessageManager:GetPendingMessages",
+                  "SystemMessageManager:HasPendingMessages",
                   "SystemMessageManager:Register",
                   "SystemMessageManager:Message:Return:OK",
                   "SystemMessageManager:AskReadyToRegister",
@@ -90,12 +91,22 @@ SystemMessageInternal.prototype = {
       });
     }
 
+    let pagesToOpen = {};
     this._pages.forEach(function(aPage) {
       if (!this._isPageMatched(aPage, aType, aPageURI.spec, aManifestURI.spec)) {
         return;
       }
 
-      this._openAppPage(aPage, aMessage, messageID);
+      // Queue this message in the corresponding pages.
+      this._queueMessage(aPage, aMessage, messageID);
+
+      // Open app pages to handle their pending messages.
+      // Note that we only need to open each app page once.
+      let key = this._createKeyForPage(aPage);
+      if (!pagesToOpen.hasOwnProperty(key)) {
+        this._openAppPage(aPage, aMessage);
+        pagesToOpen[key] = true;
+      }
     }, this);
   },
 
@@ -115,6 +126,7 @@ SystemMessageInternal.prototype = {
 
     debug("Broadcasting " + aType + " " + JSON.stringify(aMessage));
     // Find pages that registered an handler for this type.
+    let pagesToOpen = {};
     this._pages.forEach(function(aPage) {
       if (aPage.type == aType) {
         if (this._listeners[aPage.manifest]) {
@@ -127,7 +139,16 @@ SystemMessageInternal.prototype = {
                                          msgID: messageID })
           });
         }
-        this._openAppPage(aPage, aMessage, messageID);
+        // Queue this message in the corresponding pages.
+        this._queueMessage(aPage, aMessage, messageID);
+
+        // Open app pages to handle their pending messages.
+        // Note that we only need to open each app page once.
+        let key = this._createKeyForPage(aPage);
+        if (!pagesToOpen.hasOwnProperty(key)) {
+          this._openAppPage(aPage, aMessage);
+          pagesToOpen[key] = true;
+        }
       }
     }, this);
   },
@@ -189,7 +210,7 @@ SystemMessageInternal.prototype = {
           return page !== null;
         }, this);
         if (!page) {
-          return null;
+          return;
         }
 
         // Return the |msg| of each pending message (drop the |msgID|).
@@ -202,7 +223,33 @@ SystemMessageInternal.prototype = {
         // pending messages in the content process (|SystemMessageManager|).
         page.pendingMessages.length = 0;
 
-        return pendingMessages;
+        // Send the array of pending messages.
+        aMessage.target.sendAsyncMessage("SystemMessageManager:GetPendingMessages:Return",
+                                         { type: msg.type,
+                                           manifest: msg.manifest,
+                                           uri: msg.uri,
+                                           msgQueue: pendingMessages });
+        break;
+      }
+      case "SystemMessageManager:HasPendingMessages":
+      {
+        debug("received SystemMessageManager:HasPendingMessages " + msg.type +
+          " for " + msg.uri + " @ " + msg.manifest);
+
+        // This is a sync call used to return if a page has pending messages.
+        // Find the right page to get its corresponding pending messages.
+        let page = null;
+        this._pages.some(function(aPage) {
+          if (this._isPageMatched(aPage, msg.type, msg.uri, msg.manifest)) {
+            page = aPage;
+          }
+          return page !== null;
+        }, this);
+        if (!page) {
+          return false;
+        }
+
+        return page.pendingMessages.length != 0;
         break;
       }
       case "SystemMessageManager:Message:Return:OK":
@@ -266,14 +313,16 @@ SystemMessageInternal.prototype = {
     }
   },
 
-  _openAppPage: function _openAppPage(aPage, aMessage, aMessageID) {
+  _queueMessage: function _queueMessage(aPage, aMessage, aMessageID) {
     // Queue the message for this page because we've never known if an app is
     // opened or not. We'll clean it up when the app has already received it.
     aPage.pendingMessages.push({ msg: aMessage, msgID: aMessageID });
     if (aPage.pendingMessages.length > kMaxPendingMessages) {
       aPage.pendingMessages.splice(0, 1);
     }
+  },
 
+  _openAppPage: function _openAppPage(aPage, aMessage) {
     // We don't need to send the full object to observers.
     let page = { uri: aPage.uri,
                  manifest: aPage.manifest,
@@ -287,6 +336,24 @@ SystemMessageInternal.prototype = {
     return (aPage.type === aType &&
             aPage.manifest === aManifest &&
             aPage.uri === aUri)
+  },
+
+  _createKeyForPage: function _createKeyForPage(aPage) {
+    let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+                      .createInstance(Ci.nsIScriptableUnicodeConverter);
+    converter.charset = "UTF-8";
+
+    let hasher = Cc["@mozilla.org/security/hash;1"]
+                   .createInstance(Ci.nsICryptoHash);
+    hasher.init(hasher.SHA1);
+
+    // add uri and action to the hash
+    ["type", "manifest", "uri"].forEach(function(aProp) {
+      let data = converter.convertToByteArray(aPage[aProp], {});
+      hasher.update(data, data.length);
+    });
+
+    return hasher.finish(true);
   },
 
   classID: Components.ID("{70589ca5-91ac-4b9e-b839-d6a88167d714}"),

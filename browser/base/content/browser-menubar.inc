@@ -482,9 +482,7 @@
                   accesskey="&toolsMenu.accesskey;">
               <menupopup id="menu_ToolsPopup"
 #ifdef MOZ_SERVICES_SYNC
-                         onpopupshowing="gSyncUI.updateUI(); SocialMenu.populate();"
-#else
-                         onpopupshowing="SocialMenu.populate();"
+                         onpopupshowing="gSyncUI.updateUI();"
 #endif
                          >
               <menuitem id="menu_search"
@@ -510,9 +508,23 @@
                         autocheck="false"
                         command="Social:Toggle"/>
               <menu id="menu_socialAmbientMenu"
-                    class="show-only-for-keyboard"
-                    command="Social:Toggle">
-                <menupopup id="menu_socialAmbientMenuPopup"/>
+                    class="show-only-for-keyboard">
+                <menupopup id="menu_socialAmbientMenuPopup">
+                  <menuseparator id="socialAmbientMenuSeparator"
+                                 hidden="true"/>
+                  <menuitem id="social-toggle-sidebar-keyboardmenuitem"
+                            type="checkbox"
+                            autocheck="false"
+                            command="Social:ToggleSidebar"
+                            label="&social.toggleSidebar.label;"
+                            accesskey="&social.toggleSidebar.accesskey;"/>
+                  <menuitem id="social-toggle-notifications-keyboardmenuitem"
+                            type="checkbox"
+                            autocheck="false"
+                            command="Social:ToggleNotifications"
+                            label="&social.toggleNotifications.label;"
+                            accesskey="&social.toggleNotifications.accesskey;"/>
+                </menupopup>
               </menu>
 #ifdef MOZ_SERVICES_SYNC
               <!-- only one of sync-setup or sync-menu will be showing at once -->
@@ -534,6 +546,7 @@
                 <menupopup id="menuWebDeveloperPopup">
                   <menuitem id="menu_devToolbar" observes="devtoolsMenuBroadcaster_DevToolbar" accesskey="&devToolbarMenu.accesskey;"/>
                   <menuitem id="webConsole" observes="devtoolsMenuBroadcaster_WebConsole" accesskey="&webConsoleCmd.accesskey;"/>
+                  <menuitem id="menu_remoteWebConsole" observes="devtoolsMenuBroadcaster_RemoteWebConsole"/>
                   <menuitem id="menu_pageinspect" observes="devtoolsMenuBroadcaster_Inspect" accesskey="&inspectMenu.accesskey;"/>
                   <menuitem id="menu_responsiveUI" observes="devtoolsMenuBroadcaster_ResponsiveUI" accesskey="&responsiveDesignTool.accesskey;"/>
                   <menuitem id="menu_debugger" observes="devtoolsMenuBroadcaster_Debugger" accesskey="&debuggerMenu.accesskey;"/>

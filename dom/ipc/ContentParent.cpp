@@ -1228,7 +1228,9 @@ ContentParent::GetOrCreateActorForBlob(nsIDOMBlob* aBlob)
         static_cast<PBlobParent*>(remoteBlob->GetPBlob()));
     NS_ASSERTION(actor, "Null actor?!");
 
-    return actor;
+    if (static_cast<ContentParent*>(actor->Manager()) == this) {
+      return actor;
+    }
   }
 
   // XXX This is only safe so long as all blob implementations in our tree
@@ -1238,9 +1240,11 @@ ContentParent::GetOrCreateActorForBlob(nsIDOMBlob* aBlob)
 
   BlobConstructorParams params;
 
-  if (blob->IsSizeUnknown()) {
-    // We don't want to call GetSize yet since that may stat a file on the main
-    // thread here. Instead we'll learn the size lazily from the other process.
+  if (blob->IsSizeUnknown() || /*blob->IsDateUnknown()*/ 0) {
+    // We don't want to call GetSize or GetLastModifiedDate
+    // yet since that may stat a file on the main thread
+    // here. Instead we'll learn the size lazily from the
+    // other process.
     params = MysteryBlobConstructorParams();
   }
   else {
@@ -1255,6 +1259,9 @@ ContentParent::GetOrCreateActorForBlob(nsIDOMBlob* aBlob)
     nsCOMPtr<nsIDOMFile> file = do_QueryInterface(aBlob);
     if (file) {
       FileBlobConstructorParams fileParams;
+
+      rv = file->GetMozLastModifiedDate(&fileParams.modDate());
+      NS_ENSURE_SUCCESS(rv, nullptr);
 
       rv = file->GetName(fileParams.name());
       NS_ENSURE_SUCCESS(rv, nullptr);
@@ -1431,11 +1438,10 @@ ContentParent::DeallocPTestShell(PTestShellParent* shell)
  
 PAudioParent*
 ContentParent::AllocPAudio(const int32_t& numChannels,
-                           const int32_t& rate,
-                           const int32_t& format)
+                           const int32_t& rate)
 {
 #if defined(MOZ_SYDNEYAUDIO)
-    AudioParent *parent = new AudioParent(numChannels, rate, format);
+    AudioParent *parent = new AudioParent(numChannels, rate);
     NS_ADDREF(parent);
     return parent;
 #else

@@ -130,7 +130,7 @@ public:
   NS_DECL_NSIDOMSVGZOOMANDPAN
   
   // xxx I wish we could use virtual inheritance
-  NS_FORWARD_NSIDOMNODE(nsSVGSVGElementBase::)
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE
   NS_FORWARD_NSIDOMELEMENT(nsSVGSVGElementBase::)
   NS_FORWARD_NSIDOMSVGELEMENT(nsSVGSVGElementBase::)
 
@@ -351,6 +351,7 @@ private:
   nsSVGViewBox                   mViewBox;
   SVGAnimatedPreserveAspectRatio mPreserveAspectRatio;
 
+  nsAutoPtr<gfxMatrix>           mFragmentIdentifierTransform;
   nsAutoPtr<nsString>            mCurrentViewID;
 
   // The size of the rectangular SVG viewport into which we render. This is

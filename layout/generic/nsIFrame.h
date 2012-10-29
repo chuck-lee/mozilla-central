@@ -2052,7 +2052,11 @@ public:
    * @param aStopAtAncestor don't look further than aStopAtAncestor. If null,
    *   all ancestors (including across documents) will be traversed.
    * @param aOutAncestor [out] The ancestor frame the frame has chosen.  If
-   *   this frame has no ancestor, *aOutAncestor will be set to null.
+   *   this frame has no ancestor, *aOutAncestor will be set to null. If
+   * this frame is not a root frame, then *aOutAncestor will be in the same
+   * document as this frame. If this frame IsTransformed(), then *aOutAncestor
+   * will be the parent frame (if not preserve-3d) or the nearest non-transformed
+   * ancestor (if preserve-3d).
    * @return A gfxMatrix that converts points in this frame's coordinate space
    *   into points in aOutAncestor's coordinate space.
    */
@@ -2866,7 +2870,8 @@ NS_PTR_TO_INT32(frame->Properties().Get(nsIFrame::ParagraphDepthProperty()))
   bool IsAbsoluteContainer() const { return !!(mState & NS_FRAME_HAS_ABSPOS_CHILDREN); }
   bool HasAbsolutelyPositionedChildren() const;
   nsAbsoluteContainingBlock* GetAbsoluteContainingBlock() const;
-  virtual void MarkAsAbsoluteContainingBlock();
+  void MarkAsAbsoluteContainingBlock();
+  void MarkAsNotAbsoluteContainingBlock();
   // Child frame types override this function to select their own child list name
   virtual mozilla::layout::FrameChildListID GetAbsoluteListID() const { return kAbsoluteList; }
 
