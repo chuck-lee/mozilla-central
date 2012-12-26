@@ -1823,10 +1823,8 @@ let RIL = {
   },
 
   acknowledgeCdmaSms: function acknowledgeCdmaSms(success, cause) {
-    debug("######## ril_worker.js:acknowledgeCdmaSms(), success: " + success + ", cause: " + cause + "\n");
     let token = Buf.newParcel(REQUEST_CDMA_SMS_ACKNOWLEDGE);
-    Buf.writeUint32(2);
-    Buf.writeUint32(success ? 1 : 0);
+    Buf.writeUint32(success ? 0 : 1);
     Buf.writeUint32(cause);
     Buf.sendParcel();
   },
@@ -4538,7 +4536,6 @@ RIL[REQUEST_OPERATOR] = function REQUEST_OPERATOR(length, options) {
 RIL[REQUEST_RADIO_POWER] = null;
 RIL[REQUEST_DTMF] = null;
 RIL[REQUEST_SEND_SMS] = function REQUEST_SEND_SMS(length, options) {
-  debug("######## ril_worker.js:REQUEST_SEND_SMS()\n");
   if (options.rilRequestError) {
     if (DEBUG) debug("REQUEST_SEND_SMS: rilRequestError = " + options.rilRequestError);
     switch (options.rilRequestError) {
@@ -4982,7 +4979,6 @@ RIL[REQUEST_CDMA_FLASH] = null;
 RIL[REQUEST_CDMA_BURST_DTMF] = null;
 RIL[REQUEST_CDMA_VALIDATE_AND_WRITE_AKEY] = null;
 RIL[REQUEST_CDMA_SEND_SMS] = function REQUEST_CDMA_SEND_SMS(length, options) {
-  debug("######## ril_worker.js:REQUEST_CDMA_SEND_SMS()\n");
   if (options.rilRequestError) {
     if (DEBUG) debug("REQUEST_SEND_SMS: rilRequestError = " + options.rilRequestError);
     switch (options.rilRequestError) {
@@ -5204,7 +5200,6 @@ RIL[UNSOLICITED_RESPONSE_NEW_SMS] = function UNSOLICITED_RESPONSE_NEW_SMS(length
   this.acknowledgeSMS(result == PDU_FCS_OK, result);
 };
 RIL[UNSOLICITED_RESPONSE_NEW_SMS_STATUS_REPORT] = function UNSOLICITED_RESPONSE_NEW_SMS_STATUS_REPORT(length) {
-  debug("######## ril_worker.js:UNSOLICITED_RESPONSE_NEW_SMS_STATUS_REPORT()\n");
   let result = this._processSmsStatusReport(length);
   this.acknowledgeSMS(result == PDU_FCS_OK, result);
 };
@@ -5308,7 +5303,6 @@ RIL[UNSOLICITED_RESPONSE_SIM_STATUS_CHANGED] = function UNSOLICITED_RESPONSE_SIM
   this.getICCStatus();
 };
 RIL[UNSOLICITED_RESPONSE_CDMA_NEW_SMS] = function UNSOLICITED_RESPONSE_CDMA_NEW_SMS(length) {
-  debug("######## ril_worker.js:UNSOLICITED_RESPONSE_CDMA_NEW_SMS()\n");
   let result = this._processSmsDeliver(length);
   if (result != PDU_FCS_RESERVED) {
     // Not reserved FCS values, send ACK now.
@@ -7504,7 +7498,9 @@ let CdmaPDUHelper = {
    */
   writeMessage: function writeMessage(options) {
 
-    debug("######## ril_worker.js:CdmaPDUHelper:writeMessage(), options: \n" + JSON.stringify(options) + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js:CdmaPDUHelper:writeMessage(), options: \n" + JSON.stringify(options) + "\n");
+    }
 
     // Get encoding
     options.encoding = this.gsmDcsToCdmaEncoding(options.dcs);
@@ -7538,7 +7534,9 @@ let CdmaPDUHelper = {
 
     // Just fill out pascel with uncoded value, ril will encode it for us
     var addrInfo = this.addrEncoder(options.number);
-    debug("######## ril_worker.js, addrInfo: " + JSON.stringify(addrInfo) + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js, addrInfo: " + JSON.stringify(addrInfo) + "\n");
+    }
     this.writeByte(addrInfo.digitMode);
     this.writeByte(addrInfo.numberMode);
     this.writeByte(addrInfo.numberType);
@@ -7560,7 +7558,9 @@ let CdmaPDUHelper = {
       this.writeByte(encodeResult[i]);
     }
 
-    debug("######## ril_worker.js, userDataLength: " + encodeResult.length + ", userData: " + encodeResult + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js, userDataLength: " + encodeResult.length + ", userData: " + encodeResult + "\n");
+    }
     encodeResult = null;
   },
 
@@ -7600,7 +7600,9 @@ let CdmaPDUHelper = {
   addrEncoder: function addrEncoder(address) {
     var result = {};
 
-    debug("######## ril_worker.js:addrEncoder(), address: " + address + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js:addrEncoder(), address: " + address + "\n");
+    }
 
     result.numberType = PDU_CDMA_MSG_ADDR_NUMBER_TYPE_UNKNOWN;
     result.numberPlan = PDU_CDMA_MSG_ADDR_NUMBER_TYPE_UNKNOWN;
@@ -7613,7 +7615,9 @@ let CdmaPDUHelper = {
       //result.numberPlan = PDU_CDMA_MSG_ADDR_NUMBER_PLAN_ISDN;
     }
 
-    debug("######## ril_worker.js:addrEncoder(), parsed address: " + address + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js:addrEncoder(), parsed address: " + address + "\n");
+    }
 
     // Try DTMF first
     result.digitMode = PDU_CDMA_MSG_ADDR_DIGIT_MODE_DTMF;
@@ -7641,7 +7645,9 @@ let CdmaPDUHelper = {
         result.address.push(address.charCodeAt(i) & 0x7F);
       }
     }
-    debug("######## ril_worker.js:addrEncoder(), result: " + JSON.stringify(result) + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js:addrEncoder(), result: " + JSON.stringify(result) + "\n");
+    }
     return result;
   },
 
@@ -7687,7 +7693,9 @@ let CdmaPDUHelper = {
     var msgBody =  options.body + '\0',
         msgBodySize = msgBody.length;
 
-    debug("######## ril_worker.js:userDataMsgEncoder(), msg(" + msgBodySize + "): " + msgBody + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js:userDataMsgEncoder(), msg(" + msgBodySize + "): " + msgBody + "\n");
+    }
 
     bitBuffer.writeBits(PDU_CDMA_MSG_USERDATA_BODY, 8);
     // Reserve space for length
@@ -7719,7 +7727,6 @@ let CdmaPDUHelper = {
     // Fill length
     var currentPosition = bitBuffer.getWriteBufferSize();
     bitBuffer.overwriteWriteBuffer(lengthPosition - 1, [currentPosition - lengthPosition]);
-    debug("######## ril_worker.js:userDataMsgEncoder(), lengthPosition: " + lengthPosition + ", currentPosition: " + currentPosition + ", length: " + (currentPosition - lengthPosition) + "\n");
   },
 
   /**
@@ -7799,8 +7806,6 @@ let CdmaPDUHelper = {
       }
     */
 
-    debug("######## ril_worker.js:CdmaPDUHelper:readMessage()\n");
-
     let message = {};
 
     // Teleservice Identifier
@@ -7821,8 +7826,10 @@ let CdmaPDUHelper = {
     // Service Category
     message.service = this.readInt();
 
-    debug("######## ril_worker.js:readMessage(), Teleservice: " + message.teleservice +
-         ", type: " + message.messageType + ", Category: " + message.service + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js:readMessage(), Teleservice: " + message.teleservice +
+            ", type: " + message.messageType + ", Category: " + message.service + "\n");
+    }
 
     // Originated Address
     let addrInfo = {};
@@ -7846,22 +7853,24 @@ let CdmaPDUHelper = {
       message.sender += String.fromCharCode(addrDigit);
     }
 
-    debug("######## ril_worker.js:readMessage(), sender: " + message.sender + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js:readMessage(), sender: " + message.sender + "\n");
+    }
 
     // User Data
     this.userDataDecoder(message);
 
     // Transform message to GSM msg
     let msg = {
-      SMSC:           null,
-      mti:            null,
-      udhi:           null,
+      SMSC:           "",
+      mti:            0,
+      udhi:           0,
       sender:         message.sender,
       recipient:      null,
-      pid:            null,
-      epid:           null,
-      dcs:            null,
-      mwi:            message[PDU_CDMA_MSG_USERDATA_BODY].header ? message[PDU_CDMA_MSG_USERDATA_BODY].header.mwi : null,
+      pid:            PDU_PID_DEFAULT,
+      epid:           PDU_PID_DEFAULT,
+      dcs:            0,
+      mwi:            null, //message[PDU_CDMA_MSG_USERDATA_BODY].header ? message[PDU_CDMA_MSG_USERDATA_BODY].header.mwi : null,
       replace:        false,
       header:         message[PDU_CDMA_MSG_USERDATA_BODY].header,
       body:           message[PDU_CDMA_MSG_USERDATA_BODY].body,
@@ -7874,8 +7883,10 @@ let CdmaPDUHelper = {
       messageClass:   GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL]
     };
 
-    debug("######## ril_worker.js:CdmaPDUHelper:readMessage(), message: " + JSON.stringify(message) + "\n");
-    debug("######## ril_worker.js:CdmaPDUHelper:readMessage(), msg: " + JSON.stringify(msg) + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js:CdmaPDUHelper:readMessage(), message: " + JSON.stringify(message) + "\n");
+      debug("######## ril_worker.js:CdmaPDUHelper:readMessage(), msg: " + JSON.stringify(msg) + "\n");
+    }
 
     return msg;
   },
@@ -7904,7 +7915,9 @@ let CdmaPDUHelper = {
     var userDataLength = this.readInt(),
         userDataBuffer = [];
 
-    debug("######## ril_worker.js:userDataDecoder(), user data length: " + userDataLength + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js:userDataDecoder(), user data length: " + userDataLength + "\n");
+    }
 
     for (var i = 0; i < userDataLength; i++) {
         userDataBuffer.push(this.readByte());
@@ -7916,7 +7929,9 @@ let CdmaPDUHelper = {
       var id = bitBuffer.readBits(8),
           length = bitBuffer.readBits(8);
 
-      debug("######## ril_worker.js:userDataDecoder(), id: " + id + ", length: " + length + "\n");
+      if (DEBUG) {
+        debug("######## ril_worker.js:userDataDecoder(), id: " + id + ", length: " + length + "\n");
+      }
 
       switch (id) {
         case PDU_CDMA_MSG_USERDATA_MSG_ID:
@@ -7924,6 +7939,9 @@ let CdmaPDUHelper = {
           break;
         case PDU_CDMA_MSG_USERDATA_BODY:
           message[id] = this.userDataMsgDecoder(message[PDU_CDMA_MSG_USERDATA_MSG_ID].userHeader);
+          if (message[id].header) {
+            length += message[id].header.length;
+          }
           break;
         case PDU_CDMA_MSG_USERDATA_TIMESTAMP:
           message[id] = this.userDataTimestampDecoder();
@@ -7950,7 +7968,9 @@ let CdmaPDUHelper = {
     result.userHeader = bitBuffer.readBits(1);
     bitBuffer.nextOctetAlign();
 
-    debug("######## ril_worker.js:userDataMsgIdDecoder(), result: " + JSON.stringify(result) + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js:userDataMsgIdDecoder(), result: " + JSON.stringify(result) + "\n");
+    }
 
     return result;
   },
@@ -7959,13 +7979,19 @@ let CdmaPDUHelper = {
     var header = {},
         headerSize = bitBuffer.readBits(8);
 
-    debug("######## ril_worker.js:userDataHeaderDecoder(),headerSize: " + headerSize + "\n");
+    header.length = headerSize + 2; // 1 for header size indicator, 1 for padding 0
+
+    if (DEBUG) {
+      debug("######## ril_worker.js:userDataHeaderDecoder(), headerSize: " + headerSize + "\n");
+    }
 
     while (headerSize) {
       var identifier = bitBuffer.readBits(8),
           length = bitBuffer.readBits(8);
 
-      debug("######## ril_worker.js:userDataHeaderDecoder(), id: " + identifier + ", length: " + length + "\n");
+      if (DEBUG) {
+        debug("######## ril_worker.js:userDataHeaderDecoder(), id: " + identifier + ", length: " + length + "\n");
+      }
 
       headerSize -= (2 + length);
 
@@ -7979,8 +8005,10 @@ let CdmaPDUHelper = {
               header.segmentMaxSeq = max;
               header.segmentSeq = seq;
             }
-            debug("######## ril_worker.js:userDataHeaderDecoder(), PDU_IEI_CONCATENATED_SHORT_MESSAGES_8BIT, segmentRef : " + header.segmentRef +
-                 ", segmentMaxSeq: " + header.segmentMaxSeq + ", segmentSeq: " + header.segmentSeq + "\n");
+            if (DEBUG) {
+              debug("######## ril_worker.js:userDataHeaderDecoder(), PDU_IEI_CONCATENATED_SHORT_MESSAGES_8BIT, segmentRef : " + header.segmentRef +
+                   ", segmentMaxSeq: " + header.segmentMaxSeq + ", segmentSeq: " + header.segmentSeq + "\n");
+            }
           break;
         }
         case PDU_IEI_APPLICATION_PORT_ADDRESSING_SCHEME_8BIT: {
@@ -7995,8 +8023,10 @@ let CdmaPDUHelper = {
           }
           header.destinationPort = dstp;
           header.originatorPort = orip;
-          debug("######## ril_worker.js:userDataHeaderDecoder(), PDU_IEI_APPLICATION_PORT_ADDRESSING_SCHEME_8BIT, destinationPort : " + header.destinationPort +
-                 ", originatorPort: " + header.originatorPort + "\n");
+          if (DEBUG) {
+            debug("######## ril_worker.js:userDataHeaderDecoder(), PDU_IEI_APPLICATION_PORT_ADDRESSING_SCHEME_8BIT, destinationPort : " + header.destinationPort +
+                   ", originatorPort: " + header.originatorPort + "\n");
+          }
           break;
         }
         case PDU_IEI_APPLICATION_PORT_ADDRESSING_SCHEME_16BIT: {
@@ -8010,8 +8040,10 @@ let CdmaPDUHelper = {
             header.destinationPort = dstp;
             header.originatorPort = orip;
           }
-          debug("######## ril_worker.js:userDataHeaderDecoder(), PDU_IEI_APPLICATION_PORT_ADDRESSING_SCHEME_16BIT, destinationPort : " + header.destinationPort +
-                 ", originatorPort: " + header.originatorPort + "\n");
+          if (DEBUG) {
+            debug("######## ril_worker.js:userDataHeaderDecoder(), PDU_IEI_APPLICATION_PORT_ADDRESSING_SCHEME_16BIT, destinationPort : " + header.destinationPort +
+                   ", originatorPort: " + header.originatorPort + "\n");
+          }
           break;
         }
         case PDU_IEI_CONCATENATED_SHORT_MESSAGES_16BIT: {
@@ -8023,8 +8055,10 @@ let CdmaPDUHelper = {
             header.segmentMaxSeq = max;
             header.segmentSeq = seq;
           }
-          debug("######## ril_worker.js:userDataHeaderDecoder(), PDU_IEI_CONCATENATED_SHORT_MESSAGES_16BIT, segmentRef : " + header.segmentRef +
-                 ", segmentMaxSeq: " + header.segmentMaxSeq + ", segmentSeq" + header.segmentSeq + "\n");
+          if (DEBUG) {
+            debug("######## ril_worker.js:userDataHeaderDecoder(), PDU_IEI_CONCATENATED_SHORT_MESSAGES_16BIT, segmentRef : " + header.segmentRef +
+                   ", segmentMaxSeq: " + header.segmentMaxSeq + ", segmentSeq" + header.segmentSeq + "\n");
+          }
           break;
         }
         case PDU_IEI_NATIONAL_LANGUAGE_SINGLE_SHIFT: {
@@ -8081,7 +8115,9 @@ let CdmaPDUHelper = {
         }
       }
     }
-    bitBuffer.nextOctetAlign();
+    // An extra bit is added at tail, based on observation
+    bitBuffer.readBits(1);
+
     return header;
   },
 
@@ -8090,8 +8126,10 @@ let CdmaPDUHelper = {
         encoding = bitBuffer.readBits(5),
         msgBodySize = bitBuffer.readBits(8);
 
-    debug("######## ril_worker.js:userDataMsgDecoder(), encoding: " + encoding +
-         ", msgBodySize: " + msgBodySize + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js:userDataMsgDecoder(), encoding: " + encoding +
+           ", msgBodySize: " + msgBodySize + "\n");
+    }
 
     switch (encoding) {
       case PDU_CDMA_MSG_CODING_7BITS_ASCII:
@@ -8114,7 +8152,11 @@ let CdmaPDUHelper = {
 
     if (hasUserHeader) {
       result.header = this.userDataHeaderDecoder();
-      debug("######## ril_worker.js:userDataMsgDecoder(), uesr header: " + JSON.stringify(result.header) + "\n");
+      if (DEBUG) {
+        debug("######## ril_worker.js:userDataMsgDecoder(), uesr header: " + JSON.stringify(result.header) + "\n");
+      }
+      // header size is included in body size, they are decoded
+      msgBodySize -= result.header.length;
     }
 
     result.body = "";
@@ -8136,31 +8178,41 @@ let CdmaPDUHelper = {
 
     bitBuffer.nextOctetAlign();
 
-    debug("######## ril_worker.js:userDataMsgDecoder(), result: " + JSON.stringify(result) + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js:userDataMsgDecoder(), result: " + JSON.stringify(result) + "\n");
+    }
 
     return result;
   },
 
   bcdDecoder: function bcdDecoder(value) {
-    return ((value >> 4) & 0xF) * 10 + (value % 0x0F);
+    return ((value >> 4) & 0xF) * 10 + (value & 0x0F);
   },
 
   userDataTimestampDecoder: function userDataTimestampDecoder() {
     var year = this.bcdDecoder(bitBuffer.readBits(8)),
-        month = this.bcdDecoder(bitBuffer.readBits(8)),
+        month = this.bcdDecoder(bitBuffer.readBits(8)) - 1,
         date = this.bcdDecoder(bitBuffer.readBits(8)),
         hour = this.bcdDecoder(bitBuffer.readBits(8)),
         min = this.bcdDecoder(bitBuffer.readBits(8)),
         sec = this.bcdDecoder(bitBuffer.readBits(8));
+
+    if (DEBUG) {
+        debug("######## ril_worker.js:userDataTimestampDecoder(), timestamp(" + year +
+              ", " + month + ", " + date + ", " + hour + ", " + min + ", " + sec + ")\n");};
+      }
 
     if (year >= 96 && year <= 99) {
       year += 1900;
     } else {
       year += 2000;
     }
-    var result = new Date(year, month, date, hour, min, sec, 0);
+    // TODO: Confirm correct date value
+    var result = (new Date(year, month, date, hour, min, sec, 0).valueOf();
 
-    debug("######## ril_worker.js:userDataTimestampDecoder(), result: " + JSON.stringify(result) + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js:userDataTimestampDecoder(), result: " + JSON.stringify(result) + "\n");
+    }
 
     bitBuffer.nextOctetAlign();
     return result;
@@ -8174,7 +8226,9 @@ let CdmaPDUHelper = {
                    report: (replyAction & 0x1) ? true : false
                  };
 
-    debug("######## ril_worker.js:userDataReplyActionDecoder(), result: " + JSON.stringify(result) + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js:userDataReplyActionDecoder(), result: " + JSON.stringify(result) + "\n");
+    }
 
     bitBuffer.nextOctetAlign();
     return result;
@@ -8198,7 +8252,9 @@ let CdmaPDUHelper = {
       }
     }
 
-    debug("######## ril_worker.js:userDataCallbackNumberDecoder(), result: " + JSON.stringify(result) + "\n");
+    if (DEBUG) {
+      debug("######## ril_worker.js:userDataCallbackNumberDecoder(), result: " + JSON.stringify(result) + "\n");
+    }
 
     bitBuffer.nextOctetAlign();
     return result;
