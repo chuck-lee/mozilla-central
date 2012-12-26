@@ -8198,9 +8198,9 @@ let CdmaPDUHelper = {
         sec = this.bcdDecoder(bitBuffer.readBits(8));
 
     if (DEBUG) {
-        debug("######## ril_worker.js:userDataTimestampDecoder(), timestamp(" + year +
-              ", " + month + ", " + date + ", " + hour + ", " + min + ", " + sec + ")\n");};
-      }
+      debug("######## ril_worker.js:userDataTimestampDecoder(), timestamp(" + year +
+            ", " + month + ", " + date + ", " + hour + ", " + min + ", " + sec + ")\n");
+    }
 
     if (year >= 96 && year <= 99) {
       year += 1900;
