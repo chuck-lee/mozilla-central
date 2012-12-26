@@ -1780,10 +1780,16 @@ let RIL = {
       options.encodedBodyLength = options.segments[0].encodedBodyLength;
     }
 
-    Buf.newParcel(REQUEST_SEND_SMS, options);
-    Buf.writeUint32(2);
-    Buf.writeString(options.SMSC);
-    GsmPDUHelper.writeMessage(options);
+    // TODO : Determine GSM or CDMA
+    if (true) {
+      Buf.newParcel(REQUEST_CDMA_SEND_SMS, options);
+      CdmaPDUHelper.writeMessage(options);
+    } else {
+      Buf.newParcel(REQUEST_SEND_SMS, options);
+      Buf.writeUint32(2);
+      Buf.writeString(options.SMSC);
+      GsmPDUHelper.writeMessage(options);
+    }
     Buf.sendParcel();
   },
 
@@ -3593,7 +3599,7 @@ let RIL = {
 
       message = GsmPDUHelper.readMessage();
 
-          // Read string delimiters. See Buf.readString().
+      // Read string delimiters. See Buf.readString().
       Buf.readStringDelimiter(length);
     }
     if (DEBUG) debug("Got new SMS: " + JSON.stringify(message));
@@ -4523,6 +4529,7 @@ RIL[REQUEST_OPERATOR] = function REQUEST_OPERATOR(length, options) {
 RIL[REQUEST_RADIO_POWER] = null;
 RIL[REQUEST_DTMF] = null;
 RIL[REQUEST_SEND_SMS] = function REQUEST_SEND_SMS(length, options) {
+  debug("######## ril_worker.js:REQUEST_SEND_SMS()\n");
   if (options.rilRequestError) {
     if (DEBUG) debug("REQUEST_SEND_SMS: rilRequestError = " + options.rilRequestError);
     switch (options.rilRequestError) {
@@ -4965,7 +4972,52 @@ RIL[REQUEST_CDMA_QUERY_PREFERRED_VOICE_PRIVACY_MODE] = null;
 RIL[REQUEST_CDMA_FLASH] = null;
 RIL[REQUEST_CDMA_BURST_DTMF] = null;
 RIL[REQUEST_CDMA_VALIDATE_AND_WRITE_AKEY] = null;
-RIL[REQUEST_CDMA_SEND_SMS] = null;
+RIL[REQUEST_CDMA_SEND_SMS] = function REQUEST_CDMA_SEND_SMS(length, options) {
+  debug("######## ril_worker.js:REQUEST_CDMA_SEND_SMS()\n");
+  if (options.rilRequestError) {
+    if (DEBUG) debug("REQUEST_SEND_SMS: rilRequestError = " + options.rilRequestError);
+    switch (options.rilRequestError) {
+      case ERROR_SMS_SEND_FAIL_RETRY:
+        if (options.retryCount < SMS_RETRY_MAX) {
+          options.retryCount++;
+          // TODO: bug 736702 TP-MR, retry interval, retry timeout
+          this.sendSMS(options);
+          break;
+        }
+
+        // Fallback to default error handling if it meets max retry count.
+      default:
+        this.sendDOMMessage({
+          rilMessageType: "sms-send-failed",
+          envelopeId: options.envelopeId,
+          error: options.rilRequestError,
+        });
+        break;
+    }
+    return;
+  }
+
+  options.messageRef = Buf.readUint32();
+  options.ackPDU = Buf.readString();
+  options.errorCode = Buf.readUint32();
+
+  if (options.requestStatusReport) {
+    if (DEBUG) debug("waiting SMS-STATUS-REPORT for messageRef " + options.messageRef);
+    this._pendingSentSmsMap[options.messageRef] = options;
+  }
+
+  if ((options.segmentMaxSeq > 1)
+      && (options.segmentSeq < options.segmentMaxSeq)) {
+    // Not last segment
+    this._processSentSmsSegment(options);
+  } else {
+    // Last segment sent with success. Report it.
+    this.sendDOMMessage({
+      rilMessageType: "sms-sent",
+      envelopeId: options.envelopeId,
+    });
+  }
+};
 RIL[REQUEST_CDMA_SMS_ACKNOWLEDGE] = null;
 RIL[REQUEST_GSM_GET_BROADCAST_SMS_CONFIG] = null;
 RIL[REQUEST_GSM_SET_BROADCAST_SMS_CONFIG] = function REQUEST_GSM_SET_BROADCAST_SMS_CONFIG(length, options) {
@@ -7284,6 +7336,9 @@ let bitBuffer = {
   readCacheSize: 0,
   readBuffer: [],
   readIndex: 0,
+  writeCache: 0,
+  writeCacheSize: 0,
+  writeBuffer: [],
 
   // Max length is 32 because we use integer as read/write cache.
   // All read/write functions are implemented based on bitwise operation.
@@ -7310,6 +7365,45 @@ let bitBuffer = {
     return result;
   },
 
+  writeBits: function writeBits(value, length) {
+    if (length <= 0 || length > 32) {
+      return;
+    }
+
+    var totalLength = length + this.writeCacheSize;
+
+    // 8-byte cache not full
+    if (totalLength < 8) {
+      var valueMask = (1 << length) - 1;
+      this.writeCache = (this.writeCache << length) | (value & valueMask);
+      this.writeCacheSize += length;
+      return;
+    }
+
+    // Deal with unaligned part
+    if (this.writeCacheSize) {
+      var mergeLength = 8 - this.writeCacheSize,
+          valueMask = (1 << mergeLength) - 1;
+
+      this.writeCache = (this.writeCache << mergeLength) | ((value >> (length - mergeLength)) & valueMask);
+      this.writeBuffer.push(this.writeCache & 0xFF);
+      length -= mergeLength;
+    }
+
+    // Aligned part, just copy
+    this.writeCache = 0;
+    this.writeCacheSize = 0;
+    while (length >= 8) {
+      length -= 8;
+      this.writeBuffer.push((value >> length) & 0xFF);
+    }
+
+    // Rest part is saved into cache
+    this.writeCacheSize = length;
+    this.writeCache = value & ((1 << length) - 1);
+
+    return;
+  },
 
   // Drop what still in read cache and goto next 8-byte alignment.
   // There might be a better naming.
@@ -7318,13 +7412,44 @@ let bitBuffer = {
     this.readCacheSize = 0;
   },
 
+  // Flush current write cache to Buf with padding 0s.
+  // There might be a better naming.
+  flushWithPadding: function flushWithPadding() {
+    if (this.writeCacheSize) {
+      this.writeBuffer.push(this.writeCache << (8 - this.writeCacheSize));
+    }
+    this.writeCache = 0;
+    this.writeCacheSize = 0;
+  },
+
+  startWrite: function startWrite(dataBuffer) {
+    this.writeBuffer = dataBuffer;
+    this.writeCache = 0;
+    this.writeCacheSize = 0;
+  },
+
   startRead: function startRead(dataBuffer) {
     this.readBuffer = dataBuffer;
     this.readCache = 0;
     this.readCacheSize = 0;
     this.readIndex = 0;
   },
+
+  getWriteBufferSize: function getWriteBufferSize() {
+    return this.writeBuffer.length;
+  },
+
+  overwriteWriteBuffer: function overwriteWriteBuffer(position, data) {
+    var writeLength = data.length;
+    if (writeLength + position >= this.writeBuffer.length) {
+      writeLength = this.writeBuffer.length - position;
+    }
+    for (var i = 0; i < writeLength; i++) {
+      this.writeBuffer[i + position] = data[i];
+    }
+  }
 };
+
 /*
  * Currently, some function are shared with GsmPDUHelper, they should be
  * moved from GsmPDUHelper to a common object shared among GsmPDUHelper and
@@ -7336,6 +7461,252 @@ let CdmaPDUHelper = {
   // other values are referenced from android
   dtmfChars: "D1234567890*#ABC",
 
+  /**
+   * Entry point for SMS encoding, the options object is made compatible
+   * with existing writeMessage() of GsmPDUHelper
+   *
+   * @param number
+   *        String containing the address (number) of the SMS receiver
+   * @param body
+   *        String containing the message to be sent, segmented part
+   * @Param fullBody
+   *        String containing the message to be sent, unsegmented
+   * @param dcs
+   *        Data coding scheme. One of the PDU_DCS_MSG_CODING_*BITS_ALPHABET
+   *        constants.
+   * @param userDataHeaderLength
+   *        Length of embedded user data header, in bytes. The whole header
+   *        size will be userDataHeaderLength + 1; 0 for no header.
+   * @param encodedBodyLength
+   *        Length of the user data when encoded with the given DCS. For UCS2,
+   *        in bytes; for 7-bit, in septets.
+   * @param langIndex
+   *        Table index used for normal 7-bit encoded character lookup.
+   * @param langShiftIndex
+   *        Table index used for escaped 7-bit encoded character lookup.
+   * @param requestStatusReport
+   *        Request status report.
+   *
+   */
+  writeMessage: function writeMessage(options) {
+
+    debug("######## ril_worker.js:CdmaPDUHelper:writeMessage(), options: \n" + JSON.stringify(options) + "\n");
+
+    // Get encoding
+    options.encoding = this.gsmDcsToCdmaEncoding(options.dcs);
+
+    /* Reference android code
+      dos.writeInt(envelope.teleService);
+      dos.writeInt(0); //servicePresent
+      dos.writeInt(0); //serviceCategory
+      dos.write(destAddr.digitMode);
+      dos.write(destAddr.numberMode);
+      dos.write(destAddr.ton); // number_type
+      dos.write(destAddr.numberPlan);
+      dos.write(destAddr.numberOfDigits);
+      dos.write(destAddr.origBytes, 0, destAddr.origBytes.length); // digits
+      // Subaddress is not supported.
+      dos.write(0); //subaddressType
+      dos.write(0); //subaddr_odd
+      dos.write(0); //subaddr_nbr_of_digits
+      dos.write(encodedBearerData.length);
+      dos.write(encodedBearerData, 0, encodedBearerData.length);
+    //*/
+
+    // NOTE: THIS FUNCTION HAS HIGH DEPENDENCY TO rild, because
+    //       we need to fill pascel in format defined by rild
+    // currently get generic error
+
+    // Common Header
+    this.writeInt(PDU_CDMA_MSG_TELESERIVCIE_ID_SMS);
+    this.writeInt(0);
+    this.writeInt(PDU_CDMA_MSG_CATEGORY_UNSPEC);
+
+    // Just fill out pascel with uncoded value, ril will encode it for us
+    var addrInfo = this.addrEncoder(options.number);
+    debug("######## ril_worker.js, addrInfo: " + JSON.stringify(addrInfo) + "\n");
+    this.writeByte(addrInfo.digitMode);
+    this.writeByte(addrInfo.numberMode);
+    this.writeByte(addrInfo.numberType);
+    this.writeByte(addrInfo.numberPlan);
+    this.writeByte(addrInfo.address.length);
+    for (var i = 0; i < addrInfo.address.length; i++) {
+      this.writeByte(addrInfo.address[i]);
+    }
+
+    // Subaddress, not supported
+    this.writeByte(0);  // Subaddress : Type
+    this.writeByte(0);  // Subaddress : Odd
+    this.writeByte(0);  // Subaddress : length
+
+    // User Data
+    var encodeResult = this.userDataEncoder(options);
+    this.writeByte(encodeResult.length);
+    for (var i = 0; i < encodeResult.length; i++) {
+      this.writeByte(encodeResult[i]);
+    }
+
+    debug("######## ril_worker.js, userDataLength: " + encodeResult.length + ", userData: " + encodeResult + "\n");
+    encodeResult = null;
+  },
+
+  /**
+   * In android, writeInt() writes value to Buf depends on sizeof(int).
+   * This could be platform-dependent, so extract it out.
+   */
+  writeInt: function writeInt(value) {
+    Buf.writeUint32(value);
+  },
+
+  /**
+   * Currently not sure what structure to write to rild, so use a function
+   * for easier modification
+   */
+  writeByte: function writeByte(value) {
+    // GsmPDUHelper.writeHexOctet(value);
+    Buf.writeUint32(value & 0xFF);
+  },
+
+  /**
+   * Transform GSM DCS to CDMA encoding, only basic mapping is provided
+   * now.
+   * TODO: Provided detection for other CDMA encoding.
+   */
+  gsmDcsToCdmaEncoding: function gsmDcsToCdmaEncoding(encoding) {
+    switch (encoding) {
+      case PDU_DCS_MSG_CODING_7BITS_ALPHABET:
+        return PDU_CDMA_MSG_CODING_7BITS_ASCII;
+      case PDU_DCS_MSG_CODING_8BITS_ALPHABET:
+        return PDU_CDMA_MSG_CODING_OCTET;
+      case PDU_DCS_MSG_CODING_16BITS_ALPHABET:
+        return PDU_CDMA_MSG_CODING_UNICODE;
+    }
+  },
+
+  addrEncoder: function addrEncoder(address) {
+    var result = {};
+
+    debug("######## ril_worker.js:addrEncoder(), address: " + address + "\n");
+
+    result.numberType = PDU_CDMA_MSG_ADDR_NUMBER_TYPE_UNKNOWN;
+    result.numberPlan = PDU_CDMA_MSG_ADDR_NUMBER_TYPE_UNKNOWN;
+
+    // Handle +XXXXX, not sure...
+    if (address[0] === '+') {
+      address = address.substring(1);
+      // Followings are set in android, but actually useless based on spec
+      //result.numberType = PDU_CDMA_MSG_ADDR_NUMBER_TYPE_INTERNATIONAL;
+      //result.numberPlan = PDU_CDMA_MSG_ADDR_NUMBER_PLAN_ISDN;
+    }
+
+    debug("######## ril_worker.js:addrEncoder(), parsed address: " + address + "\n");
+
+    // Try DTMF first
+    result.digitMode = PDU_CDMA_MSG_ADDR_DIGIT_MODE_DTMF;
+    result.numberMode = PDU_CDMA_MSG_ADDR_NUMBER_MODE_ANSI;
+
+    result.address = [];
+    for (var i = 0; i < address.length; i++) {
+      var addrDigit = this.dtmfChars.indexOf(address.charAt(i));
+      if (addrDigit < 0) {
+        result.digitMode = PDU_CDMA_MSG_ADDR_DIGIT_MODE_ASCII;
+        result.numberMode = PDU_CDMA_MSG_ADDR_NUMBER_MODE_ASCII;
+        result.address = [];
+        break;
+      }
+      result.address.push(addrDigit)
+    }
+
+    // Not DTMF
+    if (result.digitMode !== PDU_CDMA_MSG_ADDR_DIGIT_MODE_DTMF) {
+      if (address.indexOf("@") !== -1) {
+        result.numberType = PDU_CDMA_MSG_ADDR_NUMBER_TYPE_NATIONAL;
+      }
+
+      for (var i = 0; i < address.length; i++) {
+        result.address.push(address.charCodeAt(i) & 0x7F);
+      }
+    }
+    debug("######## ril_worker.js:addrEncoder(), result: " + JSON.stringify(result) + "\n");
+    return result;
+  },
+
+  /**
+   * Encode userData with requested data, following keys are used.
+   * Corresponding and required subparameters will be added automatically.
+   *
+   * @param userData
+   *        String containing the message to be sent as user data
+   * @param dcs
+   *        Data coding scheme. One of the PDU_DCS_MSG_CODING_*BITS_ALPHABET
+   *        constants.
+   * @param requestStatusReport
+   *        Request status report.
+   */
+  userDataEncoder: function userDataEncoder(options) {
+    var userDataBuffer = [];
+    bitBuffer.startWrite(userDataBuffer);
+
+    // Message Identifier
+    this.userDataMsgIdEncoder(options);
+
+    // User Data
+    this.userDataMsgEncoder(options);
+
+    // No others now
+    return userDataBuffer;
+  },
+
+  /*
+   * User data subparameter encoders
+   */
+  userDataMsgIdEncoder: function userDataMsgIdEncoder(options) {
+    bitBuffer.writeBits(PDU_CDMA_MSG_USERDATA_MSG_ID, 8);
+    bitBuffer.writeBits(3, 8);
+    bitBuffer.writeBits(PDU_CDMA_MSG_TYPE_SUBMIT, 4);
+    bitBuffer.writeBits(1, 16); // TODO: How to get message ID?
+    bitBuffer.writeBits(0, 1);
+    bitBuffer.flushWithPadding();
+  },
+
+  userDataMsgEncoder: function userDataMsgEncoder(options) {
+    var msgBody =  options.body + '\0',
+        msgBodySize = msgBody.length;
+
+    debug("######## ril_worker.js:userDataMsgEncoder(), msg(" + msgBodySize + "): " + msgBody + "\n");
+
+    bitBuffer.writeBits(PDU_CDMA_MSG_USERDATA_BODY, 8);
+    // Reserve space for length
+    bitBuffer.writeBits(0, 8);
+    var lengthPosition = bitBuffer.getWriteBufferSize();
+
+    bitBuffer.writeBits(options.encoding, 5);
+    bitBuffer.writeBits(msgBodySize, 8);
+
+    for (var i = 0; i < msgBodySize; i++) {
+      switch (options.encoding) {
+        case PDU_CDMA_MSG_CODING_OCTET:
+          var msgDigit = msgBody.charCodeAt(i);
+          bitBuffer.writeBits(msgDigit, 8);
+          break;
+        case PDU_CDMA_MSG_CODING_7BITS_ASCII:
+          var msgDigit = msgBody.charCodeAt(i);
+          bitBuffer.writeBits(msgDigit, 7);
+          break;
+        case PDU_CDMA_MSG_CODING_UNICODE:
+          var msgDigit = msgBody.charCodeAt(i);
+          bitBuffer.writeBits(msgDigit, 16);
+          break;
+      }
+    }
+
+    bitBuffer.flushWithPadding();
+
+    // Fill length
+    var currentPosition = bitBuffer.getWriteBufferSize();
+    bitBuffer.overwriteWriteBuffer(lengthPosition - 1, [currentPosition - lengthPosition]);
+    debug("######## ril_worker.js:userDataMsgEncoder(), lengthPosition: " + lengthPosition + ", currentPosition: " + currentPosition + ", length: " + (currentPosition - lengthPosition) + "\n");
+  },
 
   /**
    * Entry point for SMS decoding, the returned object is made compatible
@@ -7445,22 +7816,18 @@ let CdmaPDUHelper = {
     addrInfo.numberMode = (this.readInt() & 0x01);
     addrInfo.numberType = (this.readInt() & 0x01);
     addrInfo.numberPlan = (this.readInt() & 0x01);
-    message.sender = "";
-    var addrLength = this.readByte();
-    for (var i = 0; i < addrLength; i++) {
-      var addrDigit = this.readByte();
-      if (addrInfo.digitMode === PDU_CDMA_MSG_ADDR_DIGIT_MODE_DTMF) {
-        message.sender += this.dtmfChars.charAt(addrDigit);
-      } else {
-        message.sender += String.fromCharCode(addrDigit);
-      }
+    addrInfo.addrLength = this.readByte();
+    addrInfo.address = [];
+    for (var i = 0; i < addrInfo.addrLength; i++) {
+      addrInfo.address.push(this.readByte());
     }
+    message.sender = this.addrDecoder(addrInfo);
 
     // Originated Subaddress
     addrInfo.Type = (this.readInt() & 0x07);
     addrInfo.Odd = (this.readByte() & 0x01);
-    addrLength = this.readByte();
-    for (var i = 0; i < addrLength; i++) {
+    addrInfo.addrLength = this.readByte();
+    for (var i = 0; i < addrInfo.addrLength; i++) {
       var addrDigit = this.readByte();
       message.sender += String.fromCharCode(addrDigit);
     }
@@ -7505,6 +7872,18 @@ let CdmaPDUHelper = {
 
   readByte: function readByte() {
     return (Buf.readUint32() & 0xFF);
+  },
+
+  addrDecoder: function addrDecoder(addrInfo) {
+    var result = "";
+    for (var i = 0; i < addrInfo.addrLength; i++) {
+      if (addrInfo.digitMode === PDU_CDMA_MSG_ADDR_DIGIT_MODE_DTMF) {
+        result += this.dtmfChars.charAt(addrInfo.address[i]);
+      } else {
+        result += String.fromCharCode(addrInfo.address[i]);
+      }
+    }
+    return result;
   },
 
   userDataDecoder: function userDataDecoder(message) {
