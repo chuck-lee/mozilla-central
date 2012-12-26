@@ -2417,12 +2417,17 @@ this.PDU_CDMA_MSG_CATEGORY_UNSPEC = 0x00; // Unknown/Unspecified
 
 // Address Information
 this.PDU_CDMA_MSG_ADDR_DIGIT_MODE_DTMF = 0x00;      // Digit Mode : DTMF
+this.PDU_CDMA_MSG_ADDR_DIGIT_MODE_ASCII = 0x01;     // Digit Mode : 8-bit ASCII with MSB = 0
 
 this.PDU_CDMA_MSG_ADDR_NUMBER_MODE_ANSI = 0x00;     // Number Mode : ANSI T1.607-2000(R2004)
+this.PDU_CDMA_MSG_ADDR_NUMBER_MODE_ASCII = 0x01;    // Number Mode : Data network address format
 
-this.PDU_CDMA_MSG_ADDR_NUMBER_TYPE_UNKNOWN = 0x00;  // Number Type : Unknown
+this.PDU_CDMA_MSG_ADDR_NUMBER_TYPE_UNKNOWN = 0x00;        // Number Type : Unknown
+this.PDU_CDMA_MSG_ADDR_NUMBER_TYPE_INTERNATIONAL = 0x01;  // Number Type : Internaltional number(+XXXXX)
+this.PDU_CDMA_MSG_ADDR_NUMBER_TYPE_NATIONAL = 0x02;       // Number Type : National number
 
 this.PDU_CDMA_MSG_ADDR_NUMBER_PLAN_UNKNOWN = 0x00;  // Number Plan : Unknown
+this.PDU_CDMA_MSG_ADDR_NUMBER_PLAN_ISDN = 0x01;     // Number Plan : ISDN/Telephony numbering plan
 
 // SMS Encoding
 this.PDU_CDMA_MSG_CODING_OCTET = 0x00;        // octet(8-bit)
