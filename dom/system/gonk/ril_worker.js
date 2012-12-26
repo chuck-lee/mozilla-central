@@ -1822,6 +1822,15 @@ let RIL = {
     this.acknowledgeSMS(options.result == PDU_FCS_OK, options.result);
   },
 
+  acknowledgeCdmaSms: function acknowledgeCdmaSms(success, cause) {
+    debug("######## ril_worker.js:acknowledgeCdmaSms(), success: " + success + ", cause: " + cause + "\n");
+    let token = Buf.newParcel(REQUEST_CDMA_SMS_ACKNOWLEDGE);
+    Buf.writeUint32(2);
+    Buf.writeUint32(success ? 1 : 0);
+    Buf.writeUint32(cause);
+    Buf.sendParcel();
+  },
+
   setCellBroadcastSearchList: function setCellBroadcastSearchList(options) {
     try {
       let str = options.searchListStr;
@@ -5303,7 +5312,7 @@ RIL[UNSOLICITED_RESPONSE_CDMA_NEW_SMS] = function UNSOLICITED_RESPONSE_CDMA_NEW_
   let result = this._processSmsDeliver(length);
   if (result != PDU_FCS_RESERVED) {
     // Not reserved FCS values, send ACK now.
-    this.acknowledgeSMS(result == PDU_FCS_OK, result);
+    this.acknowledgeCdmaSms(result == PDU_FCS_OK, result);
   }
 };
 RIL[UNSOLICITED_RESPONSE_NEW_BROADCAST_SMS] = function UNSOLICITED_RESPONSE_NEW_BROADCAST_SMS(length) {
@@ -7486,7 +7495,12 @@ let CdmaPDUHelper = {
    *        Table index used for escaped 7-bit encoded character lookup.
    * @param requestStatusReport
    *        Request status report.
-   *
+   * @param segmentRef
+   *        Reference number of concatenated SMS message
+   * @param segmentMaxSeq
+   *        Total number of concatenated SMS message
+   * @param segmentSeq
+   *        Sequence number of concatenated SMS message
    */
   writeMessage: function writeMessage(options) {
 
@@ -7847,11 +7861,11 @@ let CdmaPDUHelper = {
       pid:            null,
       epid:           null,
       dcs:            null,
-      mwi:            null,
+      mwi:            message[PDU_CDMA_MSG_USERDATA_BODY].header ? message[PDU_CDMA_MSG_USERDATA_BODY].header.mwi : null,
       replace:        false,
-      header:         null,
+      header:         message[PDU_CDMA_MSG_USERDATA_BODY].header,
       body:           message[PDU_CDMA_MSG_USERDATA_BODY].body,
-      data:           message[PDU_CDMA_MSG_USERDATA_BODY].body,
+      data:           null,
       timestamp:      message[PDU_CDMA_MSG_USERDATA_TIMESTAMP],
       status:         null,
       scts:           null,
@@ -7890,6 +7904,8 @@ let CdmaPDUHelper = {
     var userDataLength = this.readInt(),
         userDataBuffer = [];
 
+    debug("######## ril_worker.js:userDataDecoder(), user data length: " + userDataLength + "\n");
+
     for (var i = 0; i < userDataLength; i++) {
         userDataBuffer.push(this.readByte());
     }
@@ -7907,7 +7923,7 @@ let CdmaPDUHelper = {
           message[id] = this.userDataMsgIdDecoder();
           break;
         case PDU_CDMA_MSG_USERDATA_BODY:
-          message[id] = this.userDataMsgDecoder();
+          message[id] = this.userDataMsgDecoder(message[PDU_CDMA_MSG_USERDATA_MSG_ID].userHeader);
           break;
         case PDU_CDMA_MSG_USERDATA_TIMESTAMP:
           message[id] = this.userDataTimestampDecoder();
@@ -7939,7 +7955,137 @@ let CdmaPDUHelper = {
     return result;
   },
 
-  userDataMsgDecoder: function userDataMsgDecoder() {
+  userDataHeaderDecoder: function userDataHeaderDecoder() {
+    var header = {},
+        headerSize = bitBuffer.readBits(8);
+
+    debug("######## ril_worker.js:userDataHeaderDecoder(),headerSize: " + headerSize + "\n");
+
+    while (headerSize) {
+      var identifier = bitBuffer.readBits(8),
+          length = bitBuffer.readBits(8);
+
+      debug("######## ril_worker.js:userDataHeaderDecoder(), id: " + identifier + ", length: " + length + "\n");
+
+      headerSize -= (2 + length);
+
+      switch (identifier) {
+        case PDU_IEI_CONCATENATED_SHORT_MESSAGES_8BIT: {
+            let ref = bitBuffer.readBits(8),
+                max = bitBuffer.readBits(8),
+                seq = bitBuffer.readBits(8);
+            if (max && seq && (seq <= max)) {
+              header.segmentRef = ref;
+              header.segmentMaxSeq = max;
+              header.segmentSeq = seq;
+            }
+            debug("######## ril_worker.js:userDataHeaderDecoder(), PDU_IEI_CONCATENATED_SHORT_MESSAGES_8BIT, segmentRef : " + header.segmentRef +
+                 ", segmentMaxSeq: " + header.segmentMaxSeq + ", segmentSeq: " + header.segmentSeq + "\n");
+          break;
+        }
+        case PDU_IEI_APPLICATION_PORT_ADDRESSING_SCHEME_8BIT: {
+          let dstp = bitBuffer.readBits(8),
+              orip = bitBuffer.readBits(8);
+          if ((dstp < PDU_APA_RESERVED_8BIT_PORTS)
+              || (orip < PDU_APA_RESERVED_8BIT_PORTS)) {
+            // 3GPP TS 23.040 clause 9.2.3.24.3: "A receiving entity shall
+            // ignore any information element where the value of the
+            // Information-Element-Data is Reserved or not supported"
+            break;
+          }
+          header.destinationPort = dstp;
+          header.originatorPort = orip;
+          debug("######## ril_worker.js:userDataHeaderDecoder(), PDU_IEI_APPLICATION_PORT_ADDRESSING_SCHEME_8BIT, destinationPort : " + header.destinationPort +
+                 ", originatorPort: " + header.originatorPort + "\n");
+          break;
+        }
+        case PDU_IEI_APPLICATION_PORT_ADDRESSING_SCHEME_16BIT: {
+          let dstp = (bitBuffer.readBits(8) << 8) | bitBuffer.readBits(8),
+              orip = (bitBuffer.readBits(8) << 8) | bitBuffer.readBits(8);
+          // 3GPP TS 23.040 clause 9.2.3.24.4: "A receiving entity shall
+          // ignore any information element where the value of the
+          // Information-Element-Data is Reserved or not supported"
+          if ((dstp < PDU_APA_VALID_16BIT_PORTS)
+              && (orip < PDU_APA_VALID_16BIT_PORTS)) {
+            header.destinationPort = dstp;
+            header.originatorPort = orip;
+          }
+          debug("######## ril_worker.js:userDataHeaderDecoder(), PDU_IEI_APPLICATION_PORT_ADDRESSING_SCHEME_16BIT, destinationPort : " + header.destinationPort +
+                 ", originatorPort: " + header.originatorPort + "\n");
+          break;
+        }
+        case PDU_IEI_CONCATENATED_SHORT_MESSAGES_16BIT: {
+          let ref = (bitBuffer.readBits(8) << 8) | bitBuffer.readBits(8),
+              max = bitBuffer.readBits(8),
+              seq = bitBuffer.readBits(8);
+          if (max && seq && (seq <= max)) {
+            header.segmentRef = ref;
+            header.segmentMaxSeq = max;
+            header.segmentSeq = seq;
+          }
+          debug("######## ril_worker.js:userDataHeaderDecoder(), PDU_IEI_CONCATENATED_SHORT_MESSAGES_16BIT, segmentRef : " + header.segmentRef +
+                 ", segmentMaxSeq: " + header.segmentMaxSeq + ", segmentSeq" + header.segmentSeq + "\n");
+          break;
+        }
+        case PDU_IEI_NATIONAL_LANGUAGE_SINGLE_SHIFT: {
+          let langShiftIndex = bitBuffer.readBits(8);
+          if (langShiftIndex < PDU_NL_SINGLE_SHIFT_TABLES.length) {
+            header.langShiftIndex = langShiftIndex;
+          }
+          break;
+        }
+        case PDU_IEI_NATIONAL_LANGUAGE_LOCKING_SHIFT: {
+          let langIndex = bitBuffer.readBits(8);
+          if (langIndex < PDU_NL_LOCKING_SHIFT_TABLES.length) {
+            header.langIndex = langIndex;
+          }
+          break;
+        }
+        case PDU_IEI_SPECIAL_SMS_MESSAGE_INDICATION: {
+          let msgInd = bitBuffer.readBits(8) & 0xFF,
+              msgCount = bitBuffer.readBits(8);
+          /*
+           * TS 23.040 V6.8.1 Sec 9.2.3.24.2
+           * bits 1 0   : basic message indication type
+           * bits 4 3 2 : extended message indication type
+           * bits 6 5   : Profile id
+           * bit  7     : storage type
+           */
+          let storeType = msgInd & PDU_MWI_STORE_TYPE_BIT;
+          header.mwi = {};
+          mwi = header.mwi;
+
+          if (storeType == PDU_MWI_STORE_TYPE_STORE) {
+            // Store message because TP_UDH indicates so, note this may override
+            // the setting in DCS, but that is expected
+            mwi.discard = false;
+          } else if (mwi.discard === undefined) {
+            // storeType == PDU_MWI_STORE_TYPE_DISCARD
+            // only override mwi.discard here if it hasn't already been set
+            mwi.discard = true;
+          }
+
+          mwi.msgCount = msgCount & 0xFF;
+          mwi.active = mwi.msgCount > 0;
+
+          if (DEBUG) debug("MWI in TP_UDH received: " + JSON.stringify(mwi));
+
+          break;
+        }
+        default: {
+          // Drop unsupported id
+          for (var i = 0; i < length; i++) {
+            bitBuffer.readBits(8);
+          }
+          break;
+        }
+      }
+    }
+    bitBuffer.nextOctetAlign();
+    return header;
+  },
+
+  userDataMsgDecoder: function userDataMsgDecoder(hasUserHeader) {
     var result = {},
         encoding = bitBuffer.readBits(5),
         msgBodySize = bitBuffer.readBits(8);
@@ -7964,6 +8110,11 @@ let CdmaPDUHelper = {
       case PDU_CDMA_MSG_CODING_KOREAN:
         result.encoding = PDU_DCS_MSG_CODING_16BITS_ALPHABET;
         break;
+    }
+
+    if (hasUserHeader) {
+      result.header = this.userDataHeaderDecoder();
+      debug("######## ril_worker.js:userDataMsgDecoder(), uesr header: " + JSON.stringify(result.header) + "\n");
     }
 
     result.body = "";
