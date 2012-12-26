@@ -2403,5 +2403,49 @@ this.MMI_SC_BA_ALL = "330";
 this.MMI_SC_BA_MO = "333";
 this.MMI_SC_BA_MT = "353";
 
+// CDMA constants
+// SMS Message Type
+this.PDU_CDMA_MSG_TYPE_P2P = 0x00;        // Point-to-Point
+this.PDU_CDMA_MSG_TYPE_BROADCAST = 0x01;  // Broadcast
+this.PDU_CDMA_MSG_TYPE_ACK = 0x02;        // Acknowledge
+
+// SMS Teleservice Identity
+this.PDU_CDMA_MSG_TELESERIVCIE_ID_SMS = 4098; // SMS
+
+// SMS Service Category
+this.PDU_CDMA_MSG_CATEGORY_UNSPEC = 0x00; // Unknown/Unspecified
+
+// Address Information
+this.PDU_CDMA_MSG_ADDR_DIGIT_MODE_DTMF = 0x00;      // Digit Mode : DTMF
+
+this.PDU_CDMA_MSG_ADDR_NUMBER_MODE_ANSI = 0x00;     // Number Mode : ANSI T1.607-2000(R2004)
+
+this.PDU_CDMA_MSG_ADDR_NUMBER_TYPE_UNKNOWN = 0x00;  // Number Type : Unknown
+
+this.PDU_CDMA_MSG_ADDR_NUMBER_PLAN_UNKNOWN = 0x00;  // Number Plan : Unknown
+
+// SMS Encoding
+this.PDU_CDMA_MSG_CODING_OCTET = 0x00;        // octet(8-bit)
+this.PDU_CDMA_MSG_CODING_IS_91 = 0x01;        // IS-91 Extended Protocol Message(variable), Not supported
+this.PDU_CDMA_MSG_CODING_7BITS_ASCII = 0x02;  // 7-bit ASCII(7-bit)
+this.PDU_CDMA_MSG_CODING_IA5 = 0x03;          // IA5(7-bit), Not supported
+this.PDU_CDMA_MSG_CODING_UNICODE = 0x04;      // Unicode(16-bit)
+this.PDU_CDMA_MSG_CODING_JIS = 0x05;          // Shift-6 JIS(8/16-bit variable), Not supported
+this.PDU_CDMA_MSG_CODING_KOREAN = 0x06;       // Korean(8/16-bit variable), Not supported
+this.PDU_CDMA_MSG_CODING_LATIN_HEBREW = 0x07; // Latin/ Hebrew(8-bit), Not supported
+this.PDU_CDMA_MSG_CODING_LATIN = 0x08;        // Latin(8-bit), Not supported
+this.PDU_CDMA_MSG_CODING_7BITS_GSM = 0x09;    // GSM 7-bit default alphabet(7-bit), Not supported
+
+// SMS Message Type
+this.PDU_CDMA_MSG_TYPE_DELIVER = 0x01;        // Receive
+this.PDU_CDMA_MSG_TYPE_SUBMIT = 0x02;         // Send
+
+// SMS User Data Subparameters
+this.PDU_CDMA_MSG_USERDATA_MSG_ID = 0x00;           // Message Identifier
+this.PDU_CDMA_MSG_USERDATA_BODY = 0x01;             // User Data Body
+this.PDU_CDMA_MSG_USERDATA_TIMESTAMP = 0x03;        // Message Center Time Stamp
+this.PDU_CDMA_REPLY_ACTION = 0x0A;                  // Reply Option
+this.PDU_CDMA_MSG_USERDATA_CALLBACK_NUMBER = 0x0E;  // Callback Number
+
 // Allow this file to be imported via Components.utils.import().
 this.EXPORTED_SYMBOLS = Object.keys(this);
