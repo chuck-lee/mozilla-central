@@ -3581,15 +3581,22 @@ let RIL = {
       return null;
     }
 
-    // An SMS is a string, but we won't read it as such, so let's read the
-    // string length and then defer to PDU parsing helper.
-    let messageStringLength = Buf.readUint32();
-    if (DEBUG) debug("Got new SMS, length " + messageStringLength);
-    let message = GsmPDUHelper.readMessage();
-    if (DEBUG) debug("Got new SMS: " + JSON.stringify(message));
+    // TODO: Determine GSM or CDMA
+    let message = null;
+    if (true) {
+      message = CdmaPDUHelper.readMessage();
+    } else {
+      // An SMS is a string, but we won't read it as such, so let's read the
+      // string length and then defer to PDU parsing helper.
+      let messageStringLength = Buf.readUint32();
+      if (DEBUG) debug("Got new SMS, length " + messageStringLength);
 
-    // Read string delimiters. See Buf.readString().
-    Buf.readStringDelimiter(length);
+      message = GsmPDUHelper.readMessage();
+
+          // Read string delimiters. See Buf.readString().
+      Buf.readStringDelimiter(length);
+    }
+    if (DEBUG) debug("Got new SMS: " + JSON.stringify(message));
 
     return message;
   },
@@ -3608,53 +3615,58 @@ let RIL = {
       return PDU_FCS_UNSPECIFIED;
     }
 
-    if (message.epid == PDU_PID_SHORT_MESSAGE_TYPE_0) {
-      // `A short message type 0 indicates that the ME must acknowledge receipt
-      // of the short message but shall discard its contents.` ~ 3GPP TS 23.040
-      // 9.2.3.9
-      return PDU_FCS_OK;
-    }
-
-    if (message.messageClass == GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_2]) {
-      switch (message.epid) {
-        case PDU_PID_ANSI_136_R_DATA:
-        case PDU_PID_USIM_DATA_DOWNLOAD:
-          if (ICCUtilsHelper.isICCServiceAvailable("DATA_DOWNLOAD_SMS_PP")) {
-            // `If the service "data download via SMS Point-to-Point" is
-            // allocated and activated in the (U)SIM Service Table, ... then the
-            // ME shall pass the message transparently to the UICC using the
-            // ENVELOPE (SMS-PP DOWNLOAD).` ~ 3GPP TS 31.111 7.1.1.1
-            this.dataDownloadViaSMSPP(message);
-
-            // `the ME shall not display the message, or alert the user of a
-            // short message waiting.` ~ 3GPP TS 31.111 7.1.1.1
-            return PDU_FCS_RESERVED;
-          }
-          // Fall through!
-
-          // If the service "data download via SMS-PP" is not available in the
-          // (U)SIM Service Table, ..., then the ME shall store the message in
-          // EFsms in accordance with TS 31.102` ~ 3GPP TS 31.111 7.1.1.1
-        default:
-          this.writeSmsToSIM(message);
-          break;
+    // TODO: Determine GSM or CDMA
+    if (true) {
+      //
+    } else {
+      if (message.epid == PDU_PID_SHORT_MESSAGE_TYPE_0) {
+        // `A short message type 0 indicates that the ME must acknowledge receipt
+        // of the short message but shall discard its contents.` ~ 3GPP TS 23.040
+        // 9.2.3.9
+        return PDU_FCS_OK;
       }
-    }
-
-    // TODO: Bug 739143: B2G SMS: Support SMS Storage Full event
-    if ((message.messageClass != GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_0]) && !true) {
-      // `When a mobile terminated message is class 0..., the MS shall display
-      // the message immediately and send a ACK to the SC ..., irrespective of
-      // whether there is memory available in the (U)SIM or ME.` ~ 3GPP 23.038
-      // clause 4.
 
       if (message.messageClass == GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_2]) {
-        // `If all the short message storage at the MS is already in use, the
-        // MS shall return "memory capacity exceeded".` ~ 3GPP 23.038 clause 4.
-        return PDU_FCS_MEMORY_CAPACITY_EXCEEDED;
+        switch (message.epid) {
+          case PDU_PID_ANSI_136_R_DATA:
+          case PDU_PID_USIM_DATA_DOWNLOAD:
+            if (ICCUtilsHelper.isICCServiceAvailable("DATA_DOWNLOAD_SMS_PP")) {
+              // `If the service "data download via SMS Point-to-Point" is
+              // allocated and activated in the (U)SIM Service Table, ... then the
+              // ME shall pass the message transparently to the UICC using the
+              // ENVELOPE (SMS-PP DOWNLOAD).` ~ 3GPP TS 31.111 7.1.1.1
+              this.dataDownloadViaSMSPP(message);
+
+              // `the ME shall not display the message, or alert the user of a
+              // short message waiting.` ~ 3GPP TS 31.111 7.1.1.1
+              return PDU_FCS_RESERVED;
+            }
+            // Fall through!
+
+            // If the service "data download via SMS-PP" is not available in the
+            // (U)SIM Service Table, ..., then the ME shall store the message in
+            // EFsms in accordance with TS 31.102` ~ 3GPP TS 31.111 7.1.1.1
+          default:
+            this.writeSmsToSIM(message);
+            break;
+        }
       }
 
-      return PDU_FCS_UNSPECIFIED;
+      // TODO: Bug 739143: B2G SMS: Support SMS Storage Full event
+      if ((message.messageClass != GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_0]) && !true) {
+        // `When a mobile terminated message is class 0..., the MS shall display
+        // the message immediately and send a ACK to the SC ..., irrespective of
+        // whether there is memory available in the (U)SIM or ME.` ~ 3GPP 23.038
+        // clause 4.
+
+        if (message.messageClass == GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_2]) {
+          // `If all the short message storage at the MS is already in use, the
+          // MS shall return "memory capacity exceeded".` ~ 3GPP 23.038 clause 4.
+          return PDU_FCS_MEMORY_CAPACITY_EXCEEDED;
+        }
+
+        return PDU_FCS_UNSPECIFIED;
+      }
     }
 
     if (message.header && (message.header.segmentMaxSeq > 1)) {
@@ -5131,6 +5143,7 @@ RIL[UNSOLICITED_RESPONSE_NEW_SMS] = function UNSOLICITED_RESPONSE_NEW_SMS(length
   this.acknowledgeSMS(result == PDU_FCS_OK, result);
 };
 RIL[UNSOLICITED_RESPONSE_NEW_SMS_STATUS_REPORT] = function UNSOLICITED_RESPONSE_NEW_SMS_STATUS_REPORT(length) {
+  debug("######## ril_worker.js:UNSOLICITED_RESPONSE_NEW_SMS_STATUS_REPORT()\n");
   let result = this._processSmsStatusReport(length);
   this.acknowledgeSMS(result == PDU_FCS_OK, result);
 };
@@ -5233,7 +5246,14 @@ RIL[UNSOLICITED_CALL_RING] = function UNSOLICITED_CALL_RING() {
 RIL[UNSOLICITED_RESPONSE_SIM_STATUS_CHANGED] = function UNSOLICITED_RESPONSE_SIM_STATUS_CHANGED() {
   this.getICCStatus();
 };
-RIL[UNSOLICITED_RESPONSE_CDMA_NEW_SMS] = null;
+RIL[UNSOLICITED_RESPONSE_CDMA_NEW_SMS] = function UNSOLICITED_RESPONSE_CDMA_NEW_SMS(length) {
+  debug("######## ril_worker.js:UNSOLICITED_RESPONSE_CDMA_NEW_SMS()\n");
+  let result = this._processSmsDeliver(length);
+  if (result != PDU_FCS_RESERVED) {
+    // Not reserved FCS values, send ACK now.
+    this.acknowledgeSMS(result == PDU_FCS_OK, result);
+  }
+};
 RIL[UNSOLICITED_RESPONSE_NEW_BROADCAST_SMS] = function UNSOLICITED_RESPONSE_NEW_BROADCAST_SMS(length) {
   let message;
   try {
@@ -7253,6 +7273,405 @@ let GsmPDUHelper = {
     // TODO - Bug 820286: According to shouldIncludeCountryInitials, add
     // country initials to the resulting string.
     return resultString;
+  }
+};
+
+/**
+ * Provide buffer with bitwise read/write function so make encoding/decoding easier.
+ */
+let bitBuffer = {
+  readCache: 0,
+  readCacheSize: 0,
+  readBuffer: [],
+  readIndex: 0,
+
+  // Max length is 32 because we use integer as read/write cache.
+  // All read/write functions are implemented based on bitwise operation.
+  readBits: function readBits(length) {
+    if (length <= 0 || length > 32) {
+      return null;
+    }
+
+    if (length > this.readCacheSize) {
+      var bytesToRead = Math.ceil((length - this.readCacheSize) / 8);
+      for(var i = 0; i < bytesToRead; i++) {
+        this.readCache = (this.readCache << 8) | (this.readBuffer[this.readIndex++] & 0xFF);
+        this.readCacheSize += 8;
+      }
+    }
+
+    var bitOffset = (this.readCacheSize - length),
+        resultMask = (1 << length) - 1,
+        result = 0;
+
+    result = (this.readCache >> bitOffset) & resultMask;
+    this.readCacheSize -= length;
+
+    return result;
+  },
+
+
+  // Drop what still in read cache and goto next 8-byte alignment.
+  // There might be a better naming.
+  nextOctetAlign: function nextOctetAlign() {
+    this.readCache = 0;
+    this.readCacheSize = 0;
+  },
+
+  startRead: function startRead(dataBuffer) {
+    this.readBuffer = dataBuffer;
+    this.readCache = 0;
+    this.readCacheSize = 0;
+    this.readIndex = 0;
+  },
+};
+/*
+ * Currently, some function are shared with GsmPDUHelper, they should be
+ * moved from GsmPDUHelper to a common object shared among GsmPDUHelper and
+ * CdmaPDUHelper.
+ */
+let CdmaPDUHelper = {
+  //       1..........C
+  // Only "1234567890*#" is defined in C.S0005-D v2.0
+  // other values are referenced from android
+  dtmfChars: "D1234567890*#ABC",
+
+
+  /**
+   * Entry point for SMS decoding, the returned object is made compatible
+   * with existing readMessage() of GsmPDUHelper
+   */
+  readMessage: function readMessage() {
+    /* Reference android code
+      env.teleService = p.readInt(); //p_cur->uTeleserviceID
+      if (0 != p.readByte()) { //p_cur->bIsServicePresent
+          env.messageType = SmsEnvelope.MESSAGE_TYPE_BROADCAST;
+      }
+      else {
+          if (SmsEnvelope.TELESERVICE_NOT_SET == env.teleService) {
+              // assume type ACK
+              env.messageType = SmsEnvelope.MESSAGE_TYPE_ACKNOWLEDGE;
+          } else {
+              env.messageType = SmsEnvelope.MESSAGE_TYPE_POINT_TO_POINT;
+          }
+      }
+      env.serviceCategory = p.readInt(); //p_cur->uServicecategory
+
+      // address
+      addressDigitMode = p.readInt();
+      addr.digitMode = (byte) (0xFF & addressDigitMode); //p_cur->sAddress.digit_mode
+      addr.numberMode = (byte) (0xFF & p.readInt()); //p_cur->sAddress.number_mode
+      addr.ton = p.readInt(); //p_cur->sAddress.number_type
+      addr.numberPlan = (byte) (0xFF & p.readInt()); //p_cur->sAddress.number_plan
+      count = p.readByte(); //p_cur->sAddress.number_of_digits
+      addr.numberOfDigits = count;
+      data = new byte[count];
+      //p_cur->sAddress.digits[digitCount]
+      for (int index=0; index < count; index++) {
+          data[index] = p.readByte();
+
+          // convert the value if it is 4-bit DTMF to 8 bit
+          if (addressDigitMode == CdmaSmsAddress.DIGIT_MODE_4BIT_DTMF) {
+              data[index] = msg.convertDtmfToAscii(data[index]);
+          }
+      }
+
+      addr.origBytes = data;
+
+      subaddr.type = p.readInt(); // p_cur->sSubAddress.subaddressType
+      subaddr.odd = p.readByte();     // p_cur->sSubAddress.odd
+      count = p.readByte();           // p_cur->sSubAddress.number_of_digits
+
+      if (count < 0) {
+          count = 0;
+      }
+
+      // p_cur->sSubAddress.digits[digitCount] :
+
+      data = new byte[count];
+
+      for (int index = 0; index < count; ++index) {
+          data[index] = p.readByte();
+      }
+
+      subaddr.origBytes = data;
+
+      // currently not supported by the modem-lib:
+      //  env.bearerReply
+      //  env.replySeqNo
+      //  env.errorClass
+      //  env.causeCode
+
+      // bearer data
+      countInt = p.readInt(); //p_cur->uBearerDataLen
+      if (countInt < 0) {
+          countInt = 0;
+      }
+
+      data = new byte[countInt];
+      for (int index=0; index < countInt; index++) {
+          data[index] = p.readByte();
+      }
+    */
+
+    debug("######## ril_worker.js:CdmaPDUHelper:readMessage()\n");
+
+    let message = {};
+
+    // Teleservice Identifier
+    message.teleservice = this.readInt();
+
+    // Message Type
+    var isServicePresent = this.readByte();
+    if (isServicePresent) {
+      message.messageType = PDU_CDMA_MSG_TYPE_BROADCAST;
+    } else {
+      if (message.teleservice) {
+        message.messageType = PDU_CDMA_MSG_TYPE_P2P;
+      } else {
+        message.messageType = PDU_CDMA_MSG_TYPE_ACK;
+      }
+    }
+
+    // Service Category
+    message.service = this.readInt();
+
+    debug("######## ril_worker.js:readMessage(), Teleservice: " + message.teleservice +
+         ", type: " + message.messageType + ", Category: " + message.service + "\n");
+
+    // Originated Address
+    let addrInfo = {};
+    addrInfo.digitMode = (this.readInt() & 0x01);
+    addrInfo.numberMode = (this.readInt() & 0x01);
+    addrInfo.numberType = (this.readInt() & 0x01);
+    addrInfo.numberPlan = (this.readInt() & 0x01);
+    message.sender = "";
+    var addrLength = this.readByte();
+    for (var i = 0; i < addrLength; i++) {
+      var addrDigit = this.readByte();
+      if (addrInfo.digitMode === PDU_CDMA_MSG_ADDR_DIGIT_MODE_DTMF) {
+        message.sender += this.dtmfChars.charAt(addrDigit);
+      } else {
+        message.sender += String.fromCharCode(addrDigit);
+      }
+    }
+
+    // Originated Subaddress
+    addrInfo.Type = (this.readInt() & 0x07);
+    addrInfo.Odd = (this.readByte() & 0x01);
+    addrLength = this.readByte();
+    for (var i = 0; i < addrLength; i++) {
+      var addrDigit = this.readByte();
+      message.sender += String.fromCharCode(addrDigit);
+    }
+
+    debug("######## ril_worker.js:readMessage(), sender: " + message.sender + "\n");
+
+    // User Data
+    this.userDataDecoder(message);
+
+    // Transform message to GSM msg
+    let msg = {
+      SMSC:           null,
+      mti:            null,
+      udhi:           null,
+      sender:         message.sender,
+      recipient:      null,
+      pid:            null,
+      epid:           null,
+      dcs:            null,
+      mwi:            null,
+      replace:        false,
+      header:         null,
+      body:           message[PDU_CDMA_MSG_USERDATA_BODY].body,
+      data:           message[PDU_CDMA_MSG_USERDATA_BODY].body,
+      timestamp:      message[PDU_CDMA_MSG_USERDATA_TIMESTAMP],
+      status:         null,
+      scts:           null,
+      dt:             null,
+      encoding:       message[PDU_CDMA_MSG_USERDATA_BODY].encoding,
+      messageClass:   GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL]
+    };
+
+    debug("######## ril_worker.js:CdmaPDUHelper:readMessage(), message: " + JSON.stringify(message) + "\n");
+    debug("######## ril_worker.js:CdmaPDUHelper:readMessage(), msg: " + JSON.stringify(msg) + "\n");
+
+    return msg;
+  },
+
+  readInt: function readInt() {
+    return Buf.readUint32();
+  },
+
+  readByte: function readByte() {
+    return (Buf.readUint32() & 0xFF);
+  },
+
+  userDataDecoder: function userDataDecoder(message) {
+    var userDataLength = this.readInt(),
+        userDataBuffer = [];
+
+    for (var i = 0; i < userDataLength; i++) {
+        userDataBuffer.push(this.readByte());
+    }
+
+    bitBuffer.startRead(userDataBuffer);
+
+    while (userDataLength > 0) {
+      var id = bitBuffer.readBits(8),
+          length = bitBuffer.readBits(8);
+
+      debug("######## ril_worker.js:userDataDecoder(), id: " + id + ", length: " + length + "\n");
+
+      switch (id) {
+        case PDU_CDMA_MSG_USERDATA_MSG_ID:
+          message[id] = this.userDataMsgIdDecoder();
+          break;
+        case PDU_CDMA_MSG_USERDATA_BODY:
+          message[id] = this.userDataMsgDecoder();
+          break;
+        case PDU_CDMA_MSG_USERDATA_TIMESTAMP:
+          message[id] = this.userDataTimestampDecoder();
+          break;
+        case PDU_CDMA_REPLY_ACTION:
+          message[id] = this.userDataReplyActionDecoder();
+          break;
+        case PDU_CDMA_MSG_USERDATA_CALLBACK_NUMBER:
+          message[id] = this.userDataCallbackNumberDecoder();
+          break;
+      }
+
+      userDataLength -= (length + 2);
+    }
+  },
+
+  /*
+   * User data subparameter decoders
+   */
+  userDataMsgIdDecoder: function userDataMsgIdDecoder() {
+    var result = {};
+    result.msgType = bitBuffer.readBits(4);
+    result.msgId = bitBuffer.readBits(16);
+    result.userHeader = bitBuffer.readBits(1);
+    bitBuffer.nextOctetAlign();
+
+    debug("######## ril_worker.js:userDataMsgIdDecoder(), result: " + JSON.stringify(result) + "\n");
+
+    return result;
+  },
+
+  userDataMsgDecoder: function userDataMsgDecoder() {
+    var result = {},
+        encoding = bitBuffer.readBits(5),
+        msgBodySize = bitBuffer.readBits(8);
+
+    debug("######## ril_worker.js:userDataMsgDecoder(), encoding: " + encoding +
+         ", msgBodySize: " + msgBodySize + "\n");
+
+    switch (encoding) {
+      case PDU_CDMA_MSG_CODING_7BITS_ASCII:
+      case PDU_CDMA_MSG_CODING_IA5:
+      case PDU_CDMA_MSG_CODING_7BITS_GSM:
+        result.encoding = PDU_DCS_MSG_CODING_7BITS_ALPHABET;
+        break;
+      case PDU_CDMA_MSG_CODING_OCTET:
+      case PDU_CDMA_MSG_CODING_IS_91:
+      case PDU_CDMA_MSG_CODING_LATIN_HEBREW:
+      case PDU_CDMA_MSG_CODING_LATIN:
+        result.encoding = PDU_DCS_MSG_CODING_8BITS_ALPHABET;
+        break;
+      case PDU_CDMA_MSG_CODING_UNICODE:
+      case PDU_CDMA_MSG_CODING_JIS:
+      case PDU_CDMA_MSG_CODING_KOREAN:
+        result.encoding = PDU_DCS_MSG_CODING_16BITS_ALPHABET;
+        break;
+    }
+
+    result.body = "";
+    while(msgBodySize > 0) {
+      switch (encoding) {
+        case PDU_CDMA_MSG_CODING_OCTET:
+          var msgDigit = bitBuffer.readBits(8);
+          break;
+        case PDU_CDMA_MSG_CODING_7BITS_ASCII:
+          var msgDigit = bitBuffer.readBits(7);
+          break;
+        case PDU_CDMA_MSG_CODING_UNICODE:
+          var msgDigit = bitBuffer.readBits(16);
+          break;
+      }
+      result.body += String.fromCharCode(msgDigit);
+      msgBodySize--;
+    }
+
+    bitBuffer.nextOctetAlign();
+
+    debug("######## ril_worker.js:userDataMsgDecoder(), result: " + JSON.stringify(result) + "\n");
+
+    return result;
+  },
+
+  bcdDecoder: function bcdDecoder(value) {
+    return ((value >> 4) & 0xF) * 10 + (value % 0x0F);
+  },
+
+  userDataTimestampDecoder: function userDataTimestampDecoder() {
+    var year = this.bcdDecoder(bitBuffer.readBits(8)),
+        month = this.bcdDecoder(bitBuffer.readBits(8)),
+        date = this.bcdDecoder(bitBuffer.readBits(8)),
+        hour = this.bcdDecoder(bitBuffer.readBits(8)),
+        min = this.bcdDecoder(bitBuffer.readBits(8)),
+        sec = this.bcdDecoder(bitBuffer.readBits(8));
+
+    if (year >= 96 && year <= 99) {
+      year += 1900;
+    } else {
+      year += 2000;
+    }
+    var result = new Date(year, month, date, hour, min, sec, 0);
+
+    debug("######## ril_worker.js:userDataTimestampDecoder(), result: " + JSON.stringify(result) + "\n");
+
+    bitBuffer.nextOctetAlign();
+    return result;
+  },
+
+  userDataReplyActionDecoder: function userDataRelyActionDecoder() {
+    var replyAction = bitBuffer.readBits(4),
+        result = { userAck: (replyAction & 0x8) ? true : false,
+                   deliverAck: (replyAction & 0x4) ? true : false,
+                   readAck: (replyAction & 0x2) ? true : false,
+                   report: (replyAction & 0x1) ? true : false
+                 };
+
+    debug("######## ril_worker.js:userDataReplyActionDecoder(), result: " + JSON.stringify(result) + "\n");
+
+    bitBuffer.nextOctetAlign();
+    return result;
+  },
+
+  userDataCallbackNumberDecoder: function userDataCallbackNumberDecoder() {
+    var digitMode = bitBuffer.readBits(1);
+    if (digitMode) {
+      var numberType = bitBuffer.readBits(3),
+          numberPlan = bitBuffer.readBits(4);
+    }
+    var numberFields = bitBuffer.readBits(8),
+        result = "";
+    for (var i = 0; i < numberFields; i++) {
+      if (digitMode === PDU_CDMA_MSG_ADDR_DIGIT_MODE_DTMF) {
+        var addrDigit = bitBuffer.readBits(4);
+        result += this.dtmfChars.charAt(addrDigit);
+      } else {
+        var addrDigit = bitBuffer.readBits(8);
+        result += String.fromCharCode(addrDigit);
+      }
+    }
+
+    debug("######## ril_worker.js:userDataCallbackNumberDecoder(), result: " + JSON.stringify(result) + "\n");
+
+    bitBuffer.nextOctetAlign();
+    return result;
   }
 };
 
