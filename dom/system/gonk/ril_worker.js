@@ -8208,7 +8208,7 @@ let CdmaPDUHelper = {
       year += 2000;
     }
     // TODO: Confirm correct date value
-    var result = (new Date(year, month, date, hour, min, sec, 0).valueOf();
+    var result = (new Date(year, month, date, hour, min, sec, 0)).valueOf();
 
     if (DEBUG) {
       debug("######## ril_worker.js:userDataTimestampDecoder(), result: " + JSON.stringify(result) + "\n");
