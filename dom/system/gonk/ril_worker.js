@@ -7915,12 +7915,12 @@ let CdmaPDUHelper = {
     var userDataLength = this.readInt(),
         userDataBuffer = [];
 
-    if (DEBUG) {
-      debug("######## ril_worker.js:userDataDecoder(), user data length: " + userDataLength + "\n");
-    }
-
     for (var i = 0; i < userDataLength; i++) {
         userDataBuffer.push(this.readByte());
+    }
+
+    if (DEBUG) {
+      debug("######## ril_worker.js:userDataDecoder(), user data length: " + userDataLength + ", data: " + JSON.stringify(userDataBuffer) + "\n");
     }
 
     bitBuffer.startRead(userDataBuffer);
@@ -7939,9 +7939,6 @@ let CdmaPDUHelper = {
           break;
         case PDU_CDMA_MSG_USERDATA_BODY:
           message[id] = this.userDataMsgDecoder(message[PDU_CDMA_MSG_USERDATA_MSG_ID].userHeader);
-          if (message[id].header) {
-            length += message[id].header.length;
-          }
           break;
         case PDU_CDMA_MSG_USERDATA_TIMESTAMP:
           message[id] = this.userDataTimestampDecoder();
