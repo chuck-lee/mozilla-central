@@ -7730,7 +7730,6 @@ let CdmaPDUHelper = {
       var msgBodySize = msgBody.length;
 
       bitBuffer.writeBits(msgBodySize + 7, 8); // Required length for user data header
-      //bitBuffer.writeBits(msgBodySize + 6, 8); // Required length for user data header
 
       bitBuffer.writeBits(5, 8);  // total header length 5 bytes
       bitBuffer.writeBits(PDU_IEI_CONCATENATED_SHORT_MESSAGES_8BIT, 8);  // header id 0
@@ -8016,11 +8015,20 @@ let CdmaPDUHelper = {
     return result;
   },
 
-  userDataHeaderDecoder: function userDataHeaderDecoder() {
+  userDataHeaderDecoder: function userDataHeaderDecoder(encoding) {
     var header = {},
-        headerSize = bitBuffer.readBits(8);
+        headerSize = bitBuffer.readBits(8),
+        userDataHeaderSize = headerSize + 1,
+        headerPaddingBits = 0;
 
-    header.length = headerSize + 2; // 1 for header size indicator, 1 for padding 0
+    if (encoding === PDU_DCS_MSG_CODING_7BITS_ALPHABET) {
+      // Length is in 7-bit
+      header.length = Math.ceil(userDataHeaderSize * 8 / 7);
+      // Calulate padding length
+      headerPaddingBits = (header.length * 7) - (userDataHeaderSize * 8);
+    } else {
+      header.length = userDataHeaderSize;
+    }
 
     if (DEBUG) {
       debug("######## ril_worker.js:userDataHeaderDecoder(), headerSize: " + headerSize + "\n");
@@ -8156,8 +8164,10 @@ let CdmaPDUHelper = {
         }
       }
     }
-    // An extra bit is added at tail, based on observation
-    bitBuffer.readBits(1);
+
+    if (headerPaddingBits) {
+      bitBuffer.readBits(headerPaddingBits);
+    }
 
     return header;
   },
@@ -8192,7 +8202,7 @@ let CdmaPDUHelper = {
     }
 
     if (hasUserHeader) {
-      result.header = this.userDataHeaderDecoder();
+      result.header = this.userDataHeaderDecoder(result.encoding);
       if (DEBUG) {
         debug("######## ril_worker.js:userDataMsgDecoder(), uesr header: " + JSON.stringify(result.header) + "\n");
       }
