@@ -3585,18 +3585,19 @@ let RIL = {
    *
    * @param length
    *        Length of SMS string in the incoming parcel.
+   * @param smsType
+   *        Type of received SMS, "gsm"/"cdma"
    *
    * @return Message parsed or null for invalid message.
    */
-  _processReceivedSms: function _processReceivedSms(length) {
+  _processReceivedSms: function _processReceivedSms(length, smsType) {
     if (!length) {
       if (DEBUG) debug("Received empty SMS!");
       return null;
     }
 
-    // TODO: Determine GSM or CDMA
     let message = null;
-    if (true) {
+    if (smsType === "cdma") {
       message = CdmaPDUHelper.readMessage();
     } else {
       // An SMS is a string, but we won't read it as such, so let's read the
@@ -3619,17 +3620,18 @@ let RIL = {
    *
    * @param length
    *        Length of SMS string in the incoming parcel.
+   * @param smsType
+   *        Type of received SMS, "gsm"/"cdma"
    *
    * @return A failure cause defined in 3GPP 23.040 clause 9.2.3.22.
    */
-  _processSmsDeliver: function _processSmsDeliver(length) {
-    let message = this._processReceivedSms(length);
+  _processSmsDeliver: function _processSmsDeliver(length, smsType) {
+    let message = this._processReceivedSms(length, smsType);
     if (!message) {
       return PDU_FCS_UNSPECIFIED;
     }
 
-    // TODO: Determine GSM or CDMA
-    if (true) {
+    if (smsType === "cdma") {
       //
     } else {
       if (message.epid == PDU_PID_SHORT_MESSAGE_TYPE_0) {
@@ -3721,7 +3723,7 @@ let RIL = {
    * @return A failure cause defined in 3GPP 23.040 clause 9.2.3.22.
    */
   _processSmsStatusReport: function _processSmsStatusReport(length) {
-    let message = this._processReceivedSms(length);
+    let message = this._processReceivedSms(length, "gsm");
     if (!message) {
       if (DEBUG) debug("invalid SMS-STATUS-REPORT");
       return PDU_FCS_UNSPECIFIED;
@@ -5192,10 +5194,9 @@ RIL[UNSOLICITED_RESPONSE_VOICE_NETWORK_STATE_CHANGED] = function UNSOLICITED_RES
   this.requestNetworkInfo();
 };
 RIL[UNSOLICITED_RESPONSE_NEW_SMS] = function UNSOLICITED_RESPONSE_NEW_SMS(length) {
-  let result = this._processSmsDeliver(length);
+  let result = this._processSmsDeliver(length, "gsm");
   if (result == PDU_FCS_RESERVED || result == MOZ_FCS_WAIT_FOR_EXPLICIT_ACK) {
     return;
-  }
   // Not reserved FCS values, send ACK now.
   this.acknowledgeSMS(result == PDU_FCS_OK, result);
 };
@@ -5303,11 +5304,11 @@ RIL[UNSOLICITED_RESPONSE_SIM_STATUS_CHANGED] = function UNSOLICITED_RESPONSE_SIM
   this.getICCStatus();
 };
 RIL[UNSOLICITED_RESPONSE_CDMA_NEW_SMS] = function UNSOLICITED_RESPONSE_CDMA_NEW_SMS(length) {
-  let result = this._processSmsDeliver(length);
-  if (result != PDU_FCS_RESERVED) {
-    // Not reserved FCS values, send ACK now.
-    this.acknowledgeCdmaSms(result == PDU_FCS_OK, result);
-  }
+  let result = this._processSmsDeliver(length, "cdma");
+  if (result == PDU_FCS_RESERVED || result == MOZ_FCS_WAIT_FOR_EXPLICIT_ACK) {
+    return;
+  // Not reserved FCS values, send ACK now.
+  this.acknowledgeSMS(result == PDU_FCS_OK, result);
 };
 RIL[UNSOLICITED_RESPONSE_NEW_BROADCAST_SMS] = function UNSOLICITED_RESPONSE_NEW_BROADCAST_SMS(length) {
   let message;
@@ -7528,6 +7529,14 @@ let CdmaPDUHelper = {
     // currently get generic error
 
     // Common Header
+    // TODO: Support message segment
+    /* Failed code
+    if (options.segmentMaxSeq > 1) {
+      this.writeInt(PDU_CDMA_MSG_TELESERIVCIE_ID_WEMT);
+    } else {
+      this.writeInt(PDU_CDMA_MSG_TELESERIVCIE_ID_SMS);
+    }
+    //*/
     this.writeInt(PDU_CDMA_MSG_TELESERIVCIE_ID_SMS);
     this.writeInt(0);
     this.writeInt(PDU_CDMA_MSG_CATEGORY_UNSPEC);
@@ -7685,16 +7694,21 @@ let CdmaPDUHelper = {
     bitBuffer.writeBits(3, 8);
     bitBuffer.writeBits(PDU_CDMA_MSG_TYPE_SUBMIT, 4);
     bitBuffer.writeBits(1, 16); // TODO: How to get message ID?
+    // TODO: Support message segment
+    /* Failed code
+    if (options.segmentMaxSeq > 1) {
+      bitBuffer.writeBits(1, 1);
+    } else {
+      bitBuffer.writeBits(0, 1);
+    }
+    //*/
     bitBuffer.writeBits(0, 1);
     bitBuffer.flushWithPadding();
   },
 
   userDataMsgEncoder: function userDataMsgEncoder(options) {
-    var msgBody =  options.body + '\0',
-        msgBodySize = msgBody.length;
-
     if (DEBUG) {
-      debug("######## ril_worker.js:userDataMsgEncoder(), msg(" + msgBodySize + "): " + msgBody + "\n");
+      debug("######## ril_worker.js:userDataMsgEncoder(), options: " + JSON.stringify(options) + "\n");
     }
 
     bitBuffer.writeBits(PDU_CDMA_MSG_USERDATA_BODY, 8);
@@ -7703,6 +7717,36 @@ let CdmaPDUHelper = {
     var lengthPosition = bitBuffer.getWriteBufferSize();
 
     bitBuffer.writeBits(options.encoding, 5);
+
+    // TODO: Support message segment
+    /* Failed code
+    // Add user data header for message segement, mostly hard-coded
+    if (options.segmentMaxSeq > 1) {
+      if (options.segmentSeq === options.segmentMaxSeq) {
+        var msgBody =  options.body + '\0';
+      } else {
+        var msgBody =  options.body;
+      }
+      var msgBodySize = msgBody.length;
+
+      bitBuffer.writeBits(msgBodySize + 7, 8); // Required length for user data header
+      //bitBuffer.writeBits(msgBodySize + 6, 8); // Required length for user data header
+
+      bitBuffer.writeBits(5, 8);  // total header length 5 bytes
+      bitBuffer.writeBits(PDU_IEI_CONCATENATED_SHORT_MESSAGES_8BIT, 8);  // header id 0
+      bitBuffer.writeBits(3, 8);  // length of element for id 0 is 3
+      bitBuffer.writeBits(options.segmentRef & 0xFF, 8);      // Segement reference
+      bitBuffer.writeBits(options.segmentMaxSeq & 0xFF, 8);   // Max segment
+      bitBuffer.writeBits(options.segmentSeq & 0xFF, 8);      // Current segment
+      bitBuffer.writeBits(0, 1);  // A padding
+    } else {
+      var msgBody =  options.body + '\0',
+          msgBodySize = msgBody.length;
+      bitBuffer.writeBits(msgBodySize, 8);
+    }
+    //*/
+    var msgBody =  options.body + '\0',
+        msgBodySize = msgBody.length;
     bitBuffer.writeBits(msgBodySize, 8);
 
     for (var i = 0; i < msgBodySize; i++) {

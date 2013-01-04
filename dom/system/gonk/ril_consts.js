@@ -2410,7 +2410,8 @@ this.PDU_CDMA_MSG_TYPE_BROADCAST = 0x01;  // Broadcast
 this.PDU_CDMA_MSG_TYPE_ACK = 0x02;        // Acknowledge
 
 // SMS Teleservice Identity
-this.PDU_CDMA_MSG_TELESERIVCIE_ID_SMS = 4098; // SMS
+this.PDU_CDMA_MSG_TELESERIVCIE_ID_SMS = 0x1002;   // SMS
+this.PDU_CDMA_MSG_TELESERIVCIE_ID_WEMT = 0x1005;  // Wireless Enhanced Messaging Teleservice, required for fragmented SMS
 
 // SMS Service Category
 this.PDU_CDMA_MSG_CATEGORY_UNSPEC = 0x00; // Unknown/Unspecified
