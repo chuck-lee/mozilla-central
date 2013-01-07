@@ -7529,15 +7529,12 @@ let CdmaPDUHelper = {
     // currently get generic error
 
     // Common Header
-    // TODO: Support message segment
-    /* Failed code
     if (options.segmentMaxSeq > 1) {
       this.writeInt(PDU_CDMA_MSG_TELESERIVCIE_ID_WEMT);
     } else {
       this.writeInt(PDU_CDMA_MSG_TELESERIVCIE_ID_SMS);
     }
-    //*/
-    this.writeInt(PDU_CDMA_MSG_TELESERIVCIE_ID_SMS);
+
     this.writeInt(0);
     this.writeInt(PDU_CDMA_MSG_CATEGORY_UNSPEC);
 
@@ -7694,15 +7691,12 @@ let CdmaPDUHelper = {
     bitBuffer.writeBits(3, 8);
     bitBuffer.writeBits(PDU_CDMA_MSG_TYPE_SUBMIT, 4);
     bitBuffer.writeBits(1, 16); // TODO: How to get message ID?
-    // TODO: Support message segment
-    /* Failed code
     if (options.segmentMaxSeq > 1) {
       bitBuffer.writeBits(1, 1);
     } else {
       bitBuffer.writeBits(0, 1);
     }
-    //*/
-    bitBuffer.writeBits(0, 1);
+
     bitBuffer.flushWithPadding();
   },
 
@@ -7718,35 +7712,33 @@ let CdmaPDUHelper = {
 
     bitBuffer.writeBits(options.encoding, 5);
 
-    // TODO: Support message segment
-    /* Failed code
-    // Add user data header for message segement, mostly hard-coded
+    // Add user data header for message segement
+    var msgBody = options.body,
+        msgBodySize = msgBody.length;
     if (options.segmentMaxSeq > 1) {
-      if (options.segmentSeq === options.segmentMaxSeq) {
-        var msgBody =  options.body + '\0';
-      } else {
-        var msgBody =  options.body;
-      }
-      var msgBodySize = msgBody.length;
+      if (options.encoding === PDU_CDMA_MSG_CODING_7BITS_ASCII) {
+          bitBuffer.writeBits(msgBodySize + 7, 8); // Required length for user data header, in septet(7-bit)
 
-      bitBuffer.writeBits(msgBodySize + 7, 8); // Required length for user data header
+          bitBuffer.writeBits(5, 8);  // total header length 5 bytes
+          bitBuffer.writeBits(PDU_IEI_CONCATENATED_SHORT_MESSAGES_8BIT, 8);  // header id 0
+          bitBuffer.writeBits(3, 8);  // length of element for id 0 is 3
+          bitBuffer.writeBits(options.segmentRef & 0xFF, 8);      // Segement reference
+          bitBuffer.writeBits(options.segmentMaxSeq & 0xFF, 8);   // Max segment
+          bitBuffer.writeBits(options.segmentSeq & 0xFF, 8);      // Current segment
+          bitBuffer.writeBits(0, 1);  // Padding to make header data septet(7-bit) aligned
+        } else {
+          bitBuffer.writeBits(msgBodySize + 6, 8); // Required length for user data header
 
-      bitBuffer.writeBits(5, 8);  // total header length 5 bytes
-      bitBuffer.writeBits(PDU_IEI_CONCATENATED_SHORT_MESSAGES_8BIT, 8);  // header id 0
-      bitBuffer.writeBits(3, 8);  // length of element for id 0 is 3
-      bitBuffer.writeBits(options.segmentRef & 0xFF, 8);      // Segement reference
-      bitBuffer.writeBits(options.segmentMaxSeq & 0xFF, 8);   // Max segment
-      bitBuffer.writeBits(options.segmentSeq & 0xFF, 8);      // Current segment
-      bitBuffer.writeBits(0, 1);  // A padding
+          bitBuffer.writeBits(5, 8);  // total header length 5 bytes
+          bitBuffer.writeBits(PDU_IEI_CONCATENATED_SHORT_MESSAGES_8BIT, 8);  // header id 0
+          bitBuffer.writeBits(3, 8);  // length of element for id 0 is 3
+          bitBuffer.writeBits(options.segmentRef & 0xFF, 8);      // Segement reference
+          bitBuffer.writeBits(options.segmentMaxSeq & 0xFF, 8);   // Max segment
+          bitBuffer.writeBits(options.segmentSeq & 0xFF, 8);      // Current segment
+        }
     } else {
-      var msgBody =  options.body + '\0',
-          msgBodySize = msgBody.length;
       bitBuffer.writeBits(msgBodySize, 8);
     }
-    //*/
-    var msgBody =  options.body + '\0',
-        msgBodySize = msgBody.length;
-    bitBuffer.writeBits(msgBodySize, 8);
 
     for (var i = 0; i < msgBodySize; i++) {
       switch (options.encoding) {
