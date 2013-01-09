@@ -8166,8 +8166,13 @@ let CdmaPDUHelper = {
 
   userDataMsgDecoder: function userDataMsgDecoder(hasUserHeader) {
     var result = {},
-        encoding = bitBuffer.readBits(5),
-        msgBodySize = bitBuffer.readBits(8);
+        encoding = bitBuffer.readBits(5);
+
+    if(encoding === PDU_CDMA_MSG_CODING_IS_91) {
+      var msgType = bitBuffer.readBits(8);
+    }
+
+    var msgBodySize = bitBuffer.readBits(8);
     const langTable = PDU_NL_LOCKING_SHIFT_TABLES[PDU_NL_IDENTIFIER_DEFAULT];
     const langShiftTable = PDU_NL_SINGLE_SHIFT_TABLES[PDU_NL_IDENTIFIER_DEFAULT];
 
@@ -8212,11 +8217,12 @@ let CdmaPDUHelper = {
           msgDigit = String.fromCharCode(bitBuffer.readBits(8));
           break;
         case PDU_CDMA_MSG_CODING_7BITS_ASCII:
+        case PDU_CDMA_MSG_CODING_IA5:
+        case PDU_CDMA_MSG_CODING_7BITS_GSM:
           msgDigit = bitBuffer.readBits(7);
           if (msgDigit >= 32) {
             msgDigit = String.fromCharCode(msgDigit);
           } else {
-            // It seems that 0 ~ 31 of 7-bit ASCII uses GSM 7-bit default alphabet
             if (msgDigit !== PDU_NL_EXTENDED_ESCAPE) {
               msgDigit = langTable[msgDigit];
             } else {
@@ -8228,6 +8234,10 @@ let CdmaPDUHelper = {
           break;
         case PDU_CDMA_MSG_CODING_UNICODE:
           msgDigit = String.fromCharCode(bitBuffer.readBits(16));
+          break;
+        default:
+          msgBodySize = 0;
+          msgDigit = "";
           break;
       }
       result.body += msgDigit;
