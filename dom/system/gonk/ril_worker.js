@@ -7714,7 +7714,9 @@ let CdmaPDUHelper = {
 
     // Add user data header for message segement
     var msgBody = options.body,
-        msgBodySize = msgBody.length;
+        msgBodySize = (options.encoding === PDU_CDMA_MSG_CODING_7BITS_ASCII ?
+                       options.encodedBodyLength :
+                       msgBody.length);
     if (options.segmentMaxSeq > 1) {
       if (options.encoding === PDU_CDMA_MSG_CODING_7BITS_ASCII) {
           bitBuffer.writeBits(msgBodySize + 7, 8); // Required length for user data header, in septet(7-bit)
@@ -7740,15 +7742,46 @@ let CdmaPDUHelper = {
       bitBuffer.writeBits(msgBodySize, 8);
     }
 
-    for (var i = 0; i < msgBodySize; i++) {
+    const langTable = PDU_NL_LOCKING_SHIFT_TABLES[PDU_NL_IDENTIFIER_DEFAULT];
+    const langShiftTable = PDU_NL_SINGLE_SHIFT_TABLES[PDU_NL_IDENTIFIER_DEFAULT];
+    for (var i = 0; i < msgBody.length; i++) {
       switch (options.encoding) {
         case PDU_CDMA_MSG_CODING_OCTET:
           var msgDigit = msgBody.charCodeAt(i);
           bitBuffer.writeBits(msgDigit, 8);
           break;
         case PDU_CDMA_MSG_CODING_7BITS_ASCII:
-          var msgDigit = msgBody.charCodeAt(i);
-          bitBuffer.writeBits(msgDigit, 7);
+          var msgDigit = msgBody.charCodeAt(i),
+              msgDigitChar = msgBody.charAt(i);
+
+          if (msgDigit >= 32) {
+            bitBuffer.writeBits(msgDigit, 7);
+          } else {
+            msgDigit = langTable.indexOf(msgDigitChar);
+
+            if (msgDigit === PDU_NL_EXTENDED_ESCAPE) {
+              break;
+            }
+
+            if (msgDigit >= 0){
+              bitBuffer.writeBits(msgDigit, 7);
+            } else {
+              msgDigit = langShiftTable.indexOf(msgDigitChar);
+              if (msgDigit == -1) {
+                throw new Error("'" + msgDigitChar + "' is not in 7 bit alphabet "
+                                + langIndex + ":" + langShiftIndex + "!");
+                break;
+              }
+
+              if (msgDigit === PDU_NL_RESERVED_CONTROL) {
+                break;
+              }
+
+              bitBuffer.writeBits(PDU_NL_EXTENDED_ESCAPE, 7);
+              bitBuffer.writeBits(msgDigit, 7);
+            }
+          }
+
           break;
         case PDU_CDMA_MSG_CODING_UNICODE:
           var msgDigit = msgBody.charCodeAt(i);
@@ -8216,9 +8249,18 @@ let CdmaPDUHelper = {
         case PDU_CDMA_MSG_CODING_OCTET:
           msgDigit = String.fromCharCode(bitBuffer.readBits(8));
           break;
+        case PDU_CDMA_MSG_CODING_7BITS_GSM:
+          msgDigit = bitBuffer.readBits(7);
+          if (msgDigit !== PDU_NL_EXTENDED_ESCAPE) {
+            msgDigit = langTable[msgDigit];
+          } else {
+            msgDigit = bitBuffer.readBits(7);
+            msgBodySize--;
+            msgDigit = langShiftTable[msgDigit];
+          }
+          break;
         case PDU_CDMA_MSG_CODING_7BITS_ASCII:
         case PDU_CDMA_MSG_CODING_IA5:
-        case PDU_CDMA_MSG_CODING_7BITS_GSM:
           msgDigit = bitBuffer.readBits(7);
           if (msgDigit >= 32) {
             msgDigit = String.fromCharCode(msgDigit);
