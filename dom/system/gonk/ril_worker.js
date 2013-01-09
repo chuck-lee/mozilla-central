@@ -7947,25 +7947,25 @@ let CdmaPDUHelper = {
   },
 
   userDataDecoder: function userDataDecoder(message) {
-    var userDataLength = this.readInt(),
-        userDataBuffer = [];
-
-    for (var i = 0; i < userDataLength; i++) {
-        userDataBuffer.push(this.readByte());
-    }
+    var userDataLength = this.readInt();
 
     if (DEBUG) {
-      debug("######## ril_worker.js:userDataDecoder(), user data length: " + userDataLength + ", data: " + JSON.stringify(userDataBuffer) + "\n");
+      debug("######## ril_worker.js:userDataDecoder(), user data length: " + userDataLength + "\n");
     }
 
-    bitBuffer.startRead(userDataBuffer);
-
     while (userDataLength > 0) {
-      var id = bitBuffer.readBits(8),
-          length = bitBuffer.readBits(8);
+      var id = this.readByte(),
+          length = this.readByte(),
+          userDataBuffer = [];
+
+      for (var i = 0; i < length; i++) {
+          userDataBuffer.push(this.readByte());
+      }
+
+      bitBuffer.startRead(userDataBuffer);
 
       if (DEBUG) {
-        debug("######## ril_worker.js:userDataDecoder(), id: " + id + ", length: " + length + "\n");
+        debug("######## ril_worker.js:userDataDecoder(), id: " + id + ", length: " + length + ", data: " + JSON.stringify(userDataBuffer) + "\n");
       }
 
       switch (id) {
@@ -7987,6 +7987,7 @@ let CdmaPDUHelper = {
       }
 
       userDataLength -= (length + 2);
+      userDataBuffer = [];
     }
   },
 
@@ -7998,7 +7999,6 @@ let CdmaPDUHelper = {
     result.msgType = bitBuffer.readBits(4);
     result.msgId = bitBuffer.readBits(16);
     result.userHeader = bitBuffer.readBits(1);
-    bitBuffer.nextOctetAlign();
 
     if (DEBUG) {
       debug("######## ril_worker.js:userDataMsgIdDecoder(), result: " + JSON.stringify(result) + "\n");
@@ -8244,8 +8244,6 @@ let CdmaPDUHelper = {
       msgBodySize--;
     }
 
-    bitBuffer.nextOctetAlign();
-
     if (DEBUG) {
       debug("######## ril_worker.js:userDataMsgDecoder(), result: " + JSON.stringify(result) + "\n");
     }
@@ -8282,7 +8280,6 @@ let CdmaPDUHelper = {
       debug("######## ril_worker.js:userDataTimestampDecoder(), result: " + JSON.stringify(result) + "\n");
     }
 
-    bitBuffer.nextOctetAlign();
     return result;
   },
 
@@ -8298,7 +8295,6 @@ let CdmaPDUHelper = {
       debug("######## ril_worker.js:userDataReplyActionDecoder(), result: " + JSON.stringify(result) + "\n");
     }
 
-    bitBuffer.nextOctetAlign();
     return result;
   },
 
@@ -8324,7 +8320,6 @@ let CdmaPDUHelper = {
       debug("######## ril_worker.js:userDataCallbackNumberDecoder(), result: " + JSON.stringify(result) + "\n");
     }
 
-    bitBuffer.nextOctetAlign();
     return result;
   }
 };
