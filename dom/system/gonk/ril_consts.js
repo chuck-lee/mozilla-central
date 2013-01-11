@@ -2431,17 +2431,17 @@ this.PDU_CDMA_MSG_ADDR_NUMBER_PLAN_UNKNOWN = 0x00;  // Number Plan : Unknown
 this.PDU_CDMA_MSG_ADDR_NUMBER_PLAN_ISDN = 0x01;     // Number Plan : ISDN/Telephony numbering plan
 
 // SMS Encoding
-this.PDU_CDMA_MSG_CODING_OCTET = 0x00;        // octet(8-bit)
-this.PDU_CDMA_MSG_CODING_IS_91 = 0x01;        // IS-91 Extended Protocol Message(variable), Not supported
+this.PDU_CDMA_MSG_CODING_OCTET = 0x00;        // octet(8-bit), Not tested
+this.PDU_CDMA_MSG_CODING_IS_91 = 0x01;        // IS-91 Extended Protocol Message(variable), Not tested
 this.PDU_CDMA_MSG_CODING_7BITS_ASCII = 0x02;  // 7-bit ASCII(7-bit)
-this.PDU_CDMA_MSG_CODING_IA5 = 0x03;          // IA5(7-bit)
+this.PDU_CDMA_MSG_CODING_IA5 = 0x03;          // IA5(7-bit), Not tested
 this.PDU_CDMA_MSG_CODING_UNICODE = 0x04;      // Unicode(16-bit)
-this.PDU_CDMA_MSG_CODING_JIS = 0x05;          // Shift-6 JIS(8/16-bit variable), Not supported
+this.PDU_CDMA_MSG_CODING_SHIFT_JIS = 0x05;    // Shift-6 JIS(8/16-bit variable), Not supported
 this.PDU_CDMA_MSG_CODING_KOREAN = 0x06;       // Korean(8/16-bit variable), Not supported
-this.PDU_CDMA_MSG_CODING_LATIN_HEBREW = 0x07; // Latin/ Hebrew(8-bit), Not supported
-this.PDU_CDMA_MSG_CODING_LATIN = 0x08;        // Latin(8-bit), Not supported
-this.PDU_CDMA_MSG_CODING_7BITS_GSM = 0x09;    // GSM 7-bit default alphabet(7-bit)
-
+this.PDU_CDMA_MSG_CODING_LATIN_HEBREW = 0x07; // Latin/ Hebrew(8-bit), ISO/IEC 8859-8, Not supported
+this.PDU_CDMA_MSG_CODING_LATIN = 0x08;        // Latin(8-bit), ISO/IEC 8859-1, Not tested
+this.PDU_CDMA_MSG_CODING_7BITS_GSM = 0x09;    // GSM 7-bit default alphabet(7-bit), Not tested
+this.PDU_CDMA_MSG_CODING_GSM_DCS = 0x0A;      // GSM Data-Coding-Scheme, Not supported
 // SMS Message Type
 this.PDU_CDMA_MSG_TYPE_DELIVER = 0x01;        // Receive
 this.PDU_CDMA_MSG_TYPE_SUBMIT = 0x02;         // Send
@@ -2452,6 +2452,12 @@ this.PDU_CDMA_MSG_USERDATA_BODY = 0x01;             // User Data Body
 this.PDU_CDMA_MSG_USERDATA_TIMESTAMP = 0x03;        // Message Center Time Stamp
 this.PDU_CDMA_REPLY_ACTION = 0x0A;                  // Reply Option
 this.PDU_CDMA_MSG_USERDATA_CALLBACK_NUMBER = 0x0E;  // Callback Number
+
+// IS-91 Message Type
+this.PDU_CDMA_MSG_CODING_IS_91_TYPE_VOICEMAIL_STATUS = 0x82;
+this.PDU_CDMA_MSG_CODING_IS_91_TYPE_SMS_FULL = 0x83;
+this.PDU_CDMA_MSG_CODING_IS_91_TYPE_CLI = 0x84;
+this.PDU_CDMA_MSG_CODING_IS_91_TYPE_SMS = 0x85;
 
 // Allow this file to be imported via Components.utils.import().
 this.EXPORTED_SYMBOLS = Object.keys(this);
