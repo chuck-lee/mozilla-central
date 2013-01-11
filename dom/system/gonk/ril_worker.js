@@ -8227,7 +8227,7 @@ let CdmaPDUHelper = {
         result.encoding = PDU_DCS_MSG_CODING_8BITS_ALPHABET;
         break;
       case PDU_CDMA_MSG_CODING_UNICODE:
-      case PDU_CDMA_MSG_CODING_JIS:
+      case PDU_CDMA_MSG_CODING_SHIFT_JIS:
       case PDU_CDMA_MSG_CODING_KOREAN:
         result.encoding = PDU_DCS_MSG_CODING_16BITS_ALPHABET;
         break;
@@ -8244,23 +8244,43 @@ let CdmaPDUHelper = {
 
     result.body = "";
     var msgDigit;
-    while(msgBodySize > 0) {
-      switch (encoding) {
-        case PDU_CDMA_MSG_CODING_OCTET:
+    switch (encoding) {
+      case PDU_CDMA_MSG_CODING_OCTET:         // TODO : Require Test
+        while(msgBodySize > 0) {
           msgDigit = String.fromCharCode(bitBuffer.readBits(8));
-          break;
-        case PDU_CDMA_MSG_CODING_7BITS_GSM:
-          msgDigit = bitBuffer.readBits(7);
-          if (msgDigit !== PDU_NL_EXTENDED_ESCAPE) {
-            msgDigit = langTable[msgDigit];
-          } else {
-            msgDigit = bitBuffer.readBits(7);
-            msgBodySize--;
-            msgDigit = langShiftTable[msgDigit];
-          }
-          break;
-        case PDU_CDMA_MSG_CODING_7BITS_ASCII:
-        case PDU_CDMA_MSG_CODING_IA5:
+          result.body += msgDigit;
+          msgBodySize--;
+        }
+        break;
+      case PDU_CDMA_MSG_CODING_IS_91:         // TODO : Require Test
+        // Referenced from android code
+        switch (msgType) {
+          case PDU_CDMA_MSG_CODING_IS_91_TYPE_SMS:
+          case PDU_CDMA_MSG_CODING_IS_91_TYPE_SMS_FULL:
+          case PDU_CDMA_MSG_CODING_IS_91_TYPE_VOICEMAIL_STATUS:
+            while(msgBodySize > 0) {
+              msgDigit = String.fromCharCode(bitBuffer.readBits(6) + 0x20);
+              result.body += msgDigit;
+              msgBodySize--;
+            }
+            break;
+          case PDU_CDMA_MSG_CODING_IS_91_TYPE_CLI:
+            let addrInfo = {};
+            addrInfo.digitMode = PDU_CDMA_MSG_ADDR_DIGIT_MODE_DTMF;
+            addrInfo.numberMode = PDU_CDMA_MSG_ADDR_NUMBER_MODE_ANSI;
+            addrInfo.numberType = PDU_CDMA_MSG_ADDR_NUMBER_TYPE_UNKNOWN;
+            addrInfo.numberPlan = PDU_CDMA_MSG_ADDR_NUMBER_PLAN_UNKNOWN;
+            addrInfo.addrLength = msgBodySize;
+            addrInfo.address = [];
+            for (var i = 0; i < addrInfo.addrLength; i++) {
+              addrInfo.address.push(bitBuffer.readBits(4));
+            }
+            result.body = this.addrDecoder(addrInfo);
+            break;
+        }
+      case PDU_CDMA_MSG_CODING_7BITS_ASCII:
+      case PDU_CDMA_MSG_CODING_IA5:           // TODO : Require Test
+        while(msgBodySize > 0) {
           msgDigit = bitBuffer.readBits(7);
           if (msgDigit >= 32) {
             msgDigit = String.fromCharCode(msgDigit);
@@ -8273,17 +8293,88 @@ let CdmaPDUHelper = {
               msgDigit = langShiftTable[msgDigit];
             }
           }
-          break;
-        case PDU_CDMA_MSG_CODING_UNICODE:
+          result.body += msgDigit;
+          msgBodySize--;
+        }
+        break;
+      case PDU_CDMA_MSG_CODING_UNICODE:
+        while(msgBodySize > 0) {
           msgDigit = String.fromCharCode(bitBuffer.readBits(16));
-          break;
-        default:
-          msgBodySize = 0;
-          msgDigit = "";
-          break;
-      }
-      result.body += msgDigit;
-      msgBodySize--;
+          result.body += msgDigit;
+          msgBodySize--;
+        }
+        break;
+      case PDU_CDMA_MSG_CODING_7BITS_GSM:     // TODO : Require Test
+        while(msgBodySize > 0) {
+          msgDigit = bitBuffer.readBits(7);
+          if (msgDigit !== PDU_NL_EXTENDED_ESCAPE) {
+            msgDigit = langTable[msgDigit];
+          } else {
+            msgDigit = bitBuffer.readBits(7);
+            msgBodySize--;
+            msgDigit = langShiftTable[msgDigit];
+          }
+          result.body += msgDigit;
+          msgBodySize--;
+        }
+        break;
+      case PDU_CDMA_MSG_CODING_LATIN:         // TODO : Require Test
+        // Reference : http://en.wikipedia.org/wiki/ISO/IEC_8859-1
+        while(msgBodySize > 0) {
+          msgDigit = String.fromCharCode(bitBuffer.readBits(8));
+          result.body += msgDigit;
+          msgBodySize--;
+        }
+        break;
+      case PDU_CDMA_MSG_CODING_LATIN_HEBREW:  // TODO : Require Test
+        // Reference : http://en.wikipedia.org/wiki/ISO/IEC_8859-8
+        while(msgBodySize > 0) {
+          msgDigit = bitBuffer.readBits(8);
+          if (msgDigit === 0xDF) {
+            msgDigit = String.fromCharCode(0x2017);
+          } else if (msgDigit === 0xFD) {
+            msgDigit = String.fromCharCode(0x200E);
+          } else if (msgDigit === 0xFE) {
+            msgDigit = String.fromCharCode(0x200F);
+          } else if (msgDigit >= 0xE0 && msgDigit <= 0xFA) {
+            msgDigit = String.fromCharCode(0x4F0 + msgDigit);
+          } else {
+            msgDigit = String.fromCharCode(msgDigit);
+          }
+          result.body += msgDigit;
+          msgBodySize--;
+        }
+        break;
+      case PDU_CDMA_MSG_CODING_SHIFT_JIS:
+        /* too complex, not support for now
+        // Reference : http://msdn.microsoft.com/en-US/goglobal/cc305152.aspx
+        //             http://demo.icu-project.org/icu-bin/convexp?conv=Shift_JIS
+        while(msgBodySize > 0) {
+          msgDigit = bitBuffer.readBits(8);
+          if (msgDigit === 0x5C) {
+            msgDigit = String.fromCharCode(0x00A5);
+          } else if (msgDigit === 0x7E) {
+            msgDigit = String.fromCharCode(0x203E);
+          } else if (msgDigit >= 0xA1 && msgDigit <= 0xDF) {
+            msgDigit = String.fromCharCode(0xFEC0 + msgDigit);
+          } else if (msgDigit >= 0x81 && msgDigit <= 0x9F) {
+            // TBD
+            msgDigit = "";
+          } else if (msgDigit >= 0xE0 && msgDigit <= 0xEF) {
+            // TBD
+            msgDigit = "";
+          } else {
+            msgDigit = String.fromCharCode(msgDigit);
+          }
+          result.body += msgDigit;
+          msgBodySize--;
+        }
+        break;
+        //*/
+      case PDU_CDMA_MSG_CODING_KOREAN:
+      case PDU_CDMA_MSG_CODING_GSM_DCS:
+      default:
+        break;
     }
 
     if (DEBUG) {
