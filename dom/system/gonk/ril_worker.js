@@ -8051,8 +8051,10 @@ let CdmaPDUHelper = {
       header.length = Math.ceil(userDataHeaderSize * 8 / 7);
       // Calulate padding length
       headerPaddingBits = (header.length * 7) - (userDataHeaderSize * 8);
-    } else {
+    } else if (encoding === PDU_DCS_MSG_CODING_8BITS_ALPHABET) {
       header.length = userDataHeaderSize;
+    } else {
+      header.length = userDataHeaderSize / 2;
     }
 
     if (DEBUG) {
