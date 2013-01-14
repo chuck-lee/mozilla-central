@@ -7729,7 +7729,11 @@ let CdmaPDUHelper = {
           bitBuffer.writeBits(options.segmentSeq & 0xFF, 8);      // Current segment
           bitBuffer.writeBits(0, 1);  // Padding to make header data septet(7-bit) aligned
         } else {
-          bitBuffer.writeBits(msgBodySize + 6, 8); // Required length for user data header
+          if (options.encoding === PDU_CDMA_MSG_CODING_UNICODE) {
+            bitBuffer.writeBits(msgBodySize + 3, 8); // Required length for user data header, in 16-bit
+          } else {
+            bitBuffer.writeBits(msgBodySize + 6, 8); // Required length for user data header, in octet(8-bit)
+          }
 
           bitBuffer.writeBits(5, 8);  // total header length 5 bytes
           bitBuffer.writeBits(PDU_IEI_CONCATENATED_SHORT_MESSAGES_8BIT, 8);  // header id 0
