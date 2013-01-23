@@ -1780,8 +1780,7 @@ let RIL = {
       options.encodedBodyLength = options.segments[0].encodedBodyLength;
     }
 
-    // TODO : Determine GSM or CDMA
-    if (true) {
+    if (this._isCdma) {
       Buf.newParcel(REQUEST_CDMA_SEND_SMS, options);
       CdmaPDUHelper.writeMessage(options);
     } else {
